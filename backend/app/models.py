@@ -264,6 +264,16 @@ class AggregatedTelemetryResponse(BaseModel):
 
 
 # ─── Retained Audio Samples & Ground-Truth Annotation ───────────────
+RecordingDomain = Literal[
+    "airborne_microphone",
+    "accelerometer",
+    "piezoelectric",
+    "pvdf",
+    "ultrasonic_transducer",
+    "synthetic_simulation",
+    "unknown",
+]
+
 GroundTruthLabel = Literal[
     "UNREVIEWED",
     "REVIEWED",
@@ -298,6 +308,7 @@ class RetainedAudioSample(BaseModel):
     device_id: str = "esp32-zone-a-01"
     input_source: Literal["user_upload", "hardware_recording", "synthetic", "public_reference"] = "user_upload"
     is_synthetic: bool = False
+    recording_domain: RecordingDomain = "unknown"
     model_id: Optional[str] = "stratus-labs/nocturne-v1-mini"
     model_version: Optional[str] = None
     prediction: Optional[str] = None
@@ -306,6 +317,7 @@ class RetainedAudioSample(BaseModel):
     top_predictions: List[dict] = []
     waveform_preview: Optional[List[float]] = None
     spectrogram_peaks: Optional[List[dict]] = None
+    signal_analysis: Optional[dict] = None
     review_status: Literal["UNREVIEWED", "REVIEWED"] = "UNREVIEWED"
     ground_truth_label: GroundTruthLabel = "UNREVIEWED"
     verification_method: VerificationMethod = "unverified"
@@ -338,6 +350,11 @@ class ReferenceAudioCatalogItem(BaseModel):
     life_stage: str
     substrate: str
     transducer_type: str
+    recording_domain: RecordingDomain = "unknown"
+    frequency_range: Optional[str] = None
+    sample_width_bits: Optional[int] = 16
+    sample_width_bytes: Optional[int] = 2
+    laboratory_setup: Optional[str] = None
     category: str
     description: str
     duration_sec: float
@@ -387,11 +404,20 @@ class EvaluationConfusionMatrix(BaseModel):
 
 class DatasetEvaluationReport(BaseModel):
     timestamp: str
+    validation_readiness: str = "INSUFFICIENT VALIDATION DATA"
+    target_evaluation_domain: str = "airborne_microphone"
     total_samples: int
+    total_reference_recordings: int = 0
+    total_synthetic_recordings: int = 0
+    total_hardware_recordings: int = 0
     eligible_samples: int
     excluded_samples: int
+    eligible_recording_domains: List[str] = ["airborne_microphone"]
+    domain_breakdown: dict[str, int] = {}
+    transducer_breakdown: dict[str, int] = {}
     exclusion_breakdown: dict[str, int]
     label_distribution: dict[str, int]
+    independent_biological_labels: dict[str, int] = {}
     vocabulary_alignment: str
     anomaly_threshold: float = 0.05
     anomaly_metrics: Optional[EvaluationConfusionMatrix] = None

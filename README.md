@@ -533,39 +533,111 @@ Due to a hardware defect in our local INMP441 microphone module, live biological
 - **Source Catalog:** [USDA Bug Bytes Sound Library (Data.gov)](https://catalog.data.gov/dataset/bug-bytes-sound-library-stored-product-insect-pest-sounds) and [DataLumos Project 250370](https://www.datalumos.org/datalumos/project/250370/version/V1/view).
 - **Citation & Attribution:** Dr. Richard W. Mankin (USDA-ARS CMAVE, Gainesville, FL). DOI: `10.15482/USDA.ADC/1504600`.
 - **License & Rights:** U.S. Government Work (U.S. Public Domain).
-- **Target Pest Species Identified:**
+- **Target Pest Species Verified:**
   - *Sitophilus oryzae* (Rice weevil larvae, 16–18d) feeding in wheat kernels.
   - *Plodia interpunctella* (Indian meal moth larvae) feeding in dry cereal food media.
   - *Sitophilus zeamais* (Maize weevil) and *Prostephanus truncatus* (Larger grain borer).
-- **Recording Transducers & Conditions:**
-  - Brüel & Kjær 4370 Charge Accelerometers attached to acoustic chambers.
-  - Piezoelectric disk sensors and PVDF polymer film sensors.
-  - Ultrasonic acoustic emission sensors (30 kHz and 40 kHz resonance).
-- **Local Storage Outside Git:** Reference WAV recordings are stored in `backend/data/reference_datasets/bug_bytes/`, which is strictly excluded from Git via `.gitignore`.
-- **Taxonomic Provenance:** Each imported reference recording retains:
-  - `input_source = "public_reference"` (never labeled as `hardware_recording`).
-  - Original species, substrate, transducer type, sample rate, channels, duration, SHA-256 hash, and citation URL.
-  - Initial ground truth set to `TARGET_PEST_OBSERVED` with verification method `laboratory_reared_culture`.
 
-### Synthetic Bioacoustic Impulse & Feeding Simulation
-SealSense provides a deterministic bioacoustic scenario generator ([`backend/app/synthetic_generator.py`](backend/app/synthetic_generator.py)) modeling the acoustic clicks produced by internal kernel-feeding insect larvae:
-- **Poisson Click Process:** Simulates chewing, locomotion, and head-capsule snapping as a stochastic Poisson impulse train with exponential decay bursts (1.8–3.6 kHz).
-- **Configurable Parameters:**
-  - **Impulse Rate (`impulse_rate`):** Adjustable from 1.0 to 50.0 clicks/sec (typical grain larvae rate: 5–25 Hz).
-  - **Amplitude (`amplitude`):** Peak signal-to-noise ratio scaling (0.1 to 1.0).
-  - **Background Noise (`noise_level`):** Additive Gaussian white noise simulating ambient silo drafts (0.0 to 0.2).
-  - **Window Duration (`duration_sec`):** Window length (5.0s to 15.0s, standardized to 10.0s for Nocturne).
-  - **Deterministic Seed (`seed`):** Integer seed ensuring exact waveform reproducibility for regression testing.
-- **WAV Export:** Direct download link (`GET /api/simulation/synthetic/wav`) generates high-fidelity 16-bit PCM WAV audio for external analysis.
-- **Evaluation Exclusion Guardrail:** All synthetic recordings are explicitly tagged with `is_synthetic = 1` and `input_source = "synthetic"`. Synthetic samples are **strictly excluded** from scientific dataset evaluation and confusion matrix metrics.
+#### Verified Reference Audio Inventory
+The table below documents the verified acoustic characteristics and laboratory provenance of the reference recordings cataloged in [`backend/app/reference_dataset.py`](backend/app/reference_dataset.py):
 
-### Defective Hardware Fallback & Three-Way Demonstration Workflow
-SealSense strictly adheres to scientific integrity principles:
+| Filename | SHA-256 Checksum | Species & Life Stage | Format & Duration | Transducer Type | Recording Domain | Frequency Range | Substrate & Setup |
+|---|---|---|---|---|---|---|---|
+| `accelrw.wav` | `82ebb8bbd990fb49cf3888282b19a31c2b697fab3e1a46e6edd507b3504e5161` | *Sitophilus oryzae* (Rice weevil, 16–17d larvae) | 25 kHz mono, 16-bit (10.0s) | Brüel & Kjær 4370 Accelerometer | `accelerometer` | 100 Hz – 10 kHz | Wheat kernels in lead-lined acoustic chamber |
+| `pvdfrw1.wav` | `31c70733aa57036e1b2e5647b708f4677798ba3f259594a8b7532d220ba75ac0` | *Sitophilus oryzae* (Rice weevil, 17–18d larvae) | 25 kHz mono, 16-bit (10.0s) | PVDF Piezoelectric Film Sensor | `pvdf` | 500 Hz – 12 kHz | Wheat kernels resting on metalized PVDF sheet |
+| `piezorw1.wav` | `0f4aaa8e1a532bb341336deb491844ff5a25957ec76a6ce8bfe665b3d6f7ca63` | *Sitophilus oryzae* (Rice weevil, 16–17d larvae) | 25 kHz mono, 16-bit (10.0s) | Piezoelectric Disk Transducer | `piezoelectric` | 1 kHz – 10 kHz | Wheat kernels coupled to brass-backed piezo element |
+| `w30khzrw1.wav` | `af262fcbba3a5380cd93f371b71452669f8e93fbccfdda10756faf0db68272a0` | *Sitophilus oryzae* (Rice weevil larvae) | 50 kHz mono, 16-bit (10.0s) | 30 kHz Ultrasonic Transducer | `ultrasonic_transducer` | 20 kHz – 40 kHz (30 kHz peak) | Wheat kernels on waveguide coupler |
+| `w40khzrw1.wav` | `377716771b26b687ad86ee4cc8b91d66c2d8c835d526a8e628f1cadadc008a45` | *Sitophilus oryzae* (Rice weevil larvae) | 50 kHz mono, 16-bit (10.0s) | 40 kHz Ultrasonic Transducer | `ultrasonic_transducer` | 25 kHz – 50 kHz (40 kHz peak) | Wheat kernels on resonant ultrasonic horn |
+| `dfaccs11.wav` | `d363a9b9b67026a520604cbbfc64a156b6f5b83962831d29300336666174889c` | *Plodia interpunctella* (Indian meal moth larvae) | 25 kHz mono, 16-bit (30.0s) | Accelerometer (contact sensor) | `accelerometer` | 100 Hz – 8 kHz | Dry cereal food media in glass test cell |
+| `piezimm1.wav` | `c7665fc1f8d17793450c68e466cc86488662bfbf9ad16f6b206845c9d070b7f3` | *Plodia interpunctella* (Single larva) | 25 kHz mono, 16-bit (10.0s) | Piezoelectric disk transducer | `piezoelectric` | 500 Hz – 10 kHz | Dry cereal on disk sensor in shielded chamber |
+
+### Recording-Domain Separation
+SealSense establishes explicit recording-domain metadata across all sample ingestion and evaluation workflows:
+- `airborne_microphone`: Acoustic air-pressure fluctuations in headspace or ductwork (e.g. INMP441 MEMS microphone).
+- `accelerometer`: Solid-body vibration in structural bulk kernels (e.g. Brüel & Kjær 4370 charge accelerometer).
+- `piezoelectric`: Surface strain and substrate bending modes (e.g. piezo ceramic disks).
+- `pvdf`: Flexible polymer piezoelectric surface tension (e.g. metalized PVDF film sheets).
+- `ultrasonic_transducer`: High-frequency stress wave acoustic emission (AE) beyond human hearing (e.g. 30–40 kHz resonant sensors).
+- `synthetic_simulation`: Mathematically synthesized click trains or chirp sweeps.
+- `unknown`: Unverified sensor origin or unclassified uploads.
+
 > [!IMPORTANT]
-> **No Biological Fabrication:**
-> We currently have a defective INMP441 microphone element on sensor node `esp32-zone-a-01` and do not maintain living insect cultures in our test facility.
-> SealSense **never** fabricates biological sensor measurements, simulates live microphone telemetry as "hardware", or labels reference files as `hardware_recording`.
-> The operator interface prominently displays the offline hardware status and provides authentic USDA Bug Bytes recordings and synthetic simulation modes for pipeline validation.
+> **Resampling Invariance Fallacy:**
+> Downmixing and resampling audio to 16 kHz normalizes sampling rate, but does **not** alter the underlying physical sensor transfer function or acoustic impedance:
+> - A contact accelerometer measures physical acceleration ($m/s^2$) of kernels via direct mechanical coupling.
+> - An airborne microphone measures ambient air pressure ($Pa$) in silo headspace.
+> Public reference recordings retain their original transducer metadata permanently. Resampling a 25 kHz accelerometer recording to 16 kHz does not make it equivalent to an airborne microphone recording.
+
+### Correct Evaluation Eligibility & Readiness
+SealSense strictly decouples two concepts that are frequently conflated:
+1. **Biological Ground Truth:** Whether target pests were independently observed in the source sample (e.g. verified *Sitophilus oryzae* larvae in a USDA culture).
+2. **Model Evaluation Eligibility:** Whether the recording domain, acoustic bandwidth, transducer type, and class definitions are appropriate to validate a specific classifier.
+
+A laboratory recording of an insect has genuine biological provenance, but is **not** eligible to evaluate an airborne microphone classifier deployed in a silo headspace.
+
+#### Scientific Evaluation Rules ([`backend/app/evaluation.py`](backend/app/evaluation.py))
+- **Sensor Domain Compatibility:** For an airborne microphone evaluation (`target_domain = "airborne_microphone"`), all contact transducers (`accelerometer`, `pvdf`, `piezoelectric`, `ultrasonic_transducer`) are **strictly excluded**.
+- **Synthetic Data Exclusion:** All synthetic simulations (`is_synthetic = 1` or `synthetic_simulation`) are **strictly excluded** from scientific performance metrics.
+- **Vocabulary Safeguard:** Nocturne Mini was trained on outdoor nocturnal wildlife (Orthoptera, Cicadidae; 2,182 classes). Nocturne activations or an arbitrary 0.05 threshold are **never** used to claim stored-grain pest detection accuracy.
+- **Suppression of Unsupportable Metrics:** When zero eligible, sensor-compatible recordings with verified positive and negative ground truth exist, SealSense displays:
+  ```text
+  INSUFFICIENT VALIDATION DATA
+  ```
+  Accuracy, precision, recall, and F1-score are **suppressed** from field metrics until valid sensor-compatible data is collected.
+
+### Physical Acoustic Signal Analysis Engine
+To extract meaningful insight without claiming unsubstantiated insect identification, SealSense includes a deterministic signal analysis engine ([`backend/app/signal_analysis.py`](backend/app/signal_analysis.py)). For every audio clip, it computes 8 physical acoustic properties:
+1. **RMS Energy & Decibels:** Root-mean-square amplitude $\sqrt{\frac{1}{N}\sum x_i^2}$ and logarithmic level $20 \log_{10}(\text{RMS})$.
+2. **Peak Amplitude & dBFS:** Absolute peak value and decibels relative to full scale.
+3. **Spectral Centroid (Hz):** Spectral center-of-mass $\frac{\sum f \cdot |X(f)|}{\sum |X(f)|}$ indicating brightness.
+4. **Spectral Bandwidth (Hz):** Spectral spread $\sqrt{\frac{\sum (f - \text{centroid})^2 \cdot |X(f)|}{\sum |X(f)|}}$.
+5. **Spectral Flatness (Wiener Entropy):** Ratio of geometric mean to arithmetic mean of power spectrum, distinguishing pure tones ($0$) from white noise ($1$).
+6. **Zero-Crossing Rate (ZCR):** Rate of sign-changes per second, reflecting high-frequency content.
+7. **Multi-Band Energy Distribution (%):** Energy partitioned into 4 discrete spectral regimes:
+   - Sub-1 kHz ($<1\text{ kHz}$): Ambient silo rumble, ventilation hum.
+   - 1–4 kHz: Primary insect mastication and locomotion click band.
+   - 4–8 kHz: Upper structural resonance and kernel friction.
+   - Ultrasonic ($>8\text{ kHz}$): Acoustic emissions and high-frequency transducer artifacts.
+8. **Transient / Impulse Click Detection:** Documented entomological click counting:
+   - 2-pole Butterworth highpass filter ($800\text{ Hz}$) to eliminate low-frequency drift.
+   - Hilbert transform analytic signal envelope $env(t) = |x(t) + i\mathcal{H}\{x(t)\}|$.
+   - Adaptive threshold: $\text{median} + 5.0 \times \text{MAD}$ (Median Absolute Deviation).
+   - $8\text{ ms}$ refractory lockout period between consecutive impulses to prevent counting ringing oscillations.
+
+> [!NOTE]
+> **Physical Characteristics, Not Biological Diagnoses:**
+> These metrics characterize physical acoustic wave geometry (amplitude, spectral balance, envelope transient frequency). They do not constitute species identification or biological infestation diagnoses.
+
+### Repeatable Demonstration Scenarios
+The operator console provides three clearly separated demo scenarios:
+
+#### Scenario A: USDA Reference Recording
+- Select an authenticated USDA Bug Bytes recording (*Sitophilus oryzae* or *Plodia interpunctella*).
+- Play original audio directly in browser.
+- Inspect verified source metadata (species, life stage, substrate, transducer type, laboratory chamber, citation).
+- Compute physical acoustic signal characteristics (RMS, spectral centroid, 4-band distribution, transient clicks).
+- Run Nocturne Mini inference as an experimental demonstration with full domain caveats.
+
+#### Scenario B: Synthetic Simulation
+- Configure deterministic impulse generation: rate ($1.0–50.0\text{ Hz}$), click amplitude ($0.1–1.0$), noise level ($0.0–0.2$), duration ($5–15\text{s}$), and reproducible seed (e.g. `42`).
+- Reproduce exact identical waveforms bit-for-bit using the fixed seed.
+- Execute the complete ingestion pipeline (resampling, envelope, FFT peaks, inference, signal metrics).
+- Prominently label the entire result **SYNTHETIC** and enforce automatic evaluation exclusion (`is_synthetic = 1`).
+
+#### Scenario C: Hardware Unavailable
+- Prominently display the disconnected / defective INMP441 microphone state (`esp32-zone-a-01`).
+- Display pinout diagnostics (GPIO 25, 26, 33) and DMA buffer configuration.
+- Enforce strict project integrity: **zero fabricated hardware telemetry or false live observations**.
+
+### Improved Evaluation Dashboard
+The updated dataset evaluation dashboard ([`src/pages/AcousticMonitoring.tsx`](src/pages/AcousticMonitoring.tsx)) provides:
+1. **Validation Readiness Banner:** Clearly displays `INSUFFICIENT VALIDATION DATA` when sensor-compatible evaluation data is absent.
+2. **Total Counts:** Total retained recordings, reference recordings, synthetic recordings, and hardware recordings.
+3. **Recordings by Transducer Type:** Counts categorized by Accelerometer, PVDF film, Piezo disk, Ultrasonic sensor, Synthetic generator, and MEMS microphone.
+4. **Recording Domains & Eligibility:** Displays counts per domain with clear eligibility indicators (`airborne_microphone` = Target; others = Incompatible).
+5. **Exclusion Reasons:** Detailed breakdown for `sensor_domain_incompatible`, `synthetic_simulation`, `unreviewed_sample`, and `inconclusive_observation`.
+6. **Independent Biological Labels:** Distribution of physical trap findings (`TARGET_PEST_OBSERVED`, `NO_TARGET_PEST_OBSERVED`, `INCONCLUSIVE`, `UNREVIEWED`).
+7. **Performance Metric Suppression:** Accuracy, precision, recall, and F1 are hidden whenever valid evaluation data is insufficient.
 
 ### Persistent Audio Storage Outside SQLite
 Original WAV audio files are stored directly on the host filesystem under a dedicated storage directory, keeping SQLite lightweight:
@@ -577,67 +649,23 @@ Original WAV audio files are stored directly on the host filesystem under a dedi
 - **Path Traversal Defense:** Sample IDs are strictly validated with `^[a-zA-Z0-9_\-]+$`. Any request containing `..`, slashes, or null bytes is rejected with `HTTP 400 Bad Request`.
 - **Safe Deletion:** Deleting a sample (`DELETE /api/audio-samples/{id}`) safely unlinks the file from disk (handling orphaned files gracefully) and deletes its database record.
 
-### Sample Metadata & Ground-Truth States
-Each retained audio sample is tracked in the `retained_audio_samples` table with the following metadata:
-- `id`: Unique sample identifier (`samp-...`).
-- `filename`: Original upload filename.
-- `file_path`: Absolute filesystem path outside SQLite.
-- `sha256_hash`: Cryptographic checksum for integrity and duplicate prevention.
-- `sample_rate`, `channels`, `duration_sec`: Verified audio parameters.
-- `input_source`: Source category (`synthetic`, `user_upload`, or `hardware_recording`).
-- `is_synthetic`: Boolean exclusion flag.
-- `prediction`, `score`, `confidence_band`: Nocturne Mini output at ingestion time.
-- `review_status`: Review workflow status (`UNREVIEWED`, `REVIEWED`).
-- `ground_truth_label`: Independent physical observation state:
-  - `UNREVIEWED`: Newly ingested sample awaiting physical trap check.
-  - `REVIEWED`: Preliminary review completed without definitive physical trap findings.
-  - `TARGET_PEST_OBSERVED`: Physical sampling confirmed live target insects in grain mass.
-  - `NO_TARGET_PEST_OBSERVED`: Physical inspection confirmed clean grain / pest-free.
-  - `INCONCLUSIVE`: Ambiguous physical findings (e.g. traps still incubating, low trap count).
-- `verification_method`: Physical sampling technique used to verify presence.
-- `reviewer` & `reviewed_at`: Inspector name and timestamp.
-- `evidence_notes`: Detailed physical observation evidence (e.g., insect count, sieve mesh size, trap location).
-
-### Independent Physical Verification Methods
-Ground truth must be established by independent physical evidence, never by model prediction:
-- `physical_trap_inspection`: Spear probe pitfall trap inserted into bulk grain mass.
-- `grain_sieve`: Standardized multi-mesh sieve tray screening of core samples.
-- `visual_sample`: Surface headspace visual inspection or conveyor discharge sample.
-- `acoustic_expert_review`: Entomologist audio spectrogram analysis.
-- `unverified`: Default state before physical inspection.
-
-### Scientific Guardrails & Taxonomic Boundaries
-> [!CAUTION]
-> **Taxonomic Vocabulary Alignment:**
-> Nocturne Mini was trained on an outdoor biodiversity corpus (InsectSet459 / iNat-Sounds-2024; 2,182 species) composed of outdoor wild insects, birds, and amphibians. It does **not** contain a validated stored-grain pest taxonomy (*Sitophilus oryzae*, *Rhyzopertha dominica*, *Tribolium castaneum*).
-> 
-> SealSense **does not** fabricate arbitrary mappings between wild outdoor species labels and storage beetles. Instead, offline evaluation uses an **acoustic anomaly score threshold** (default: `0.05`) to evaluate whether elevated acoustic energy / activations correlate with physically confirmed pest presence.
-> 
-> **Evaluation Exclusion Guardrails:**
-> - **Synthetic samples (`is_synthetic = 1`) are strictly excluded** from real-world evaluation metrics.
-> - **Unreviewed recordings (`UNREVIEWED`) and inconclusive findings (`INCONCLUSIVE`) are strictly excluded** to preserve evaluation integrity.
-
 ### Offline Evaluation Utility (CLI)
 A standalone, reproducible evaluation CLI is provided at [`backend/evaluate_dataset.py`](backend/evaluate_dataset.py):
 
 ```bash
-# Run evaluation with default anomaly decision threshold (0.05)
-backend/.venv/bin/python3 backend/evaluate_dataset.py
+# Run evaluation with default airborne microphone target domain
+backend/.venv/bin/python3 backend/evaluate_dataset.py --threshold 0.05
 
-# Specify custom threshold and export JSON report
-backend/.venv/bin/python3 backend/evaluate_dataset.py --threshold 0.08 --output eval_report.json
+# Evaluate against a specific transducer domain
+backend/.venv/bin/python3 backend/evaluate_dataset.py --domain accelerometer --threshold 0.05
+
+# Output machine-readable JSON evaluation report
+backend/.venv/bin/python3 backend/evaluate_dataset.py --json
 ```
-
-The report provides:
-1. Total, eligible, and excluded sample counts with complete exclusion breakdown.
-2. Ground-truth label distribution.
-3. Confusion matrix ($TP, FP, TN, FN$) against physical observations.
-4. Precision, Recall (Sensitivity), Specificity, and F1 score (or an explicit statement if insufficient samples exist).
-5. Explicit taxonomic and biological limitations statement.
 
 ### Dataset Manifest Export (JSON & CSV)
 Reproducible dataset manifests can be exported via the API:
-- `GET /api/dataset/manifest?format=json`: Complete structured JSON manifest including SHA-256 hashes and evidence notes.
+- `GET /api/dataset/manifest?format=json`: Complete structured JSON manifest including SHA-256 hashes, transducer types, recording domains, and physical observation evidence notes.
 - `GET /api/dataset/manifest?format=csv`: Flat CSV export suitable for external statistical packages and tabular review.
 - Pass `include_synthetic=true` to include benchmark test chirps in the export.
 

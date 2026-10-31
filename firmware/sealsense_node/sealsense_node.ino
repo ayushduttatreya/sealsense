@@ -29,8 +29,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-// Check your installed version: Sensirion I2C SCD4x
-#include <SensirionI2CScd4x.h>
+// Sensirion I2C SCD4x v1.1.0 API
+#include <SensirionI2cScd4x.h>
 
 // ─── Configuration ───────────────────────────────────────────────
 const char* WIFI_SSID     = "YOUR_SSID";
@@ -61,7 +61,7 @@ const float CO2_CRITICAL_PPM  = 1200.0f;
 const float RH_WARN_PCT       = 70.0f;   // Air RH — NOT grain moisture
 
 // ─── Globals ─────────────────────────────────────────────────────
-SensirionI2CScd4x scd4x;
+SensirionI2cScd4x scd4x;
 
 // SCD41 last readings
 float     lastCO2_ppm  = NAN;
@@ -97,7 +97,7 @@ String getISO8601();
 void setup() {
   Serial.begin(115200);
   delay(500);
-  Serial.println("[SealSense] Booting firmware " FIRMWARE_VER);
+  Serial.println(String("[SealSense] Booting firmware ") + FIRMWARE_VER);
   Serial.println("[SealSense] Device: " + String(DEVICE_ID) + " Zone: " + String(ZONE_ID));
 
   pinMode(BUZZER_PIN, OUTPUT);
@@ -164,10 +164,10 @@ void loop() {
 
 // ─── SCD41 Setup ─────────────────────────────────────────────────
 void setupSCD41() {
-  uint16_t err;
-  char     errMsg[64];
+  int16_t err;
+  char    errMsg[64];
 
-  scd4x.begin(Wire);
+  scd4x.begin(Wire, SCD41_I2C_ADDR_62);
 
   // Stop any ongoing measurements before reconfiguring
   err = scd4x.stopPeriodicMeasurement();
@@ -177,15 +177,15 @@ void setupSCD41() {
   delay(500);
 
   // Verify serial number (sanity check that sensor is present)
-  uint16_t sn0, sn1, sn2;
-  err = scd4x.getSerialNumber(sn0, sn1, sn2);
+  uint64_t serialNumber = 0;
+  err = scd4x.getSerialNumber(serialNumber);
   if (err) {
     errorToString(err, errMsg, sizeof(errMsg));
     Serial.printf("[SCD41] ERROR getSerialNumber: %s\n", errMsg);
     Serial.println("[SCD41] Check wiring: SDA=GPIO21 SCL=GPIO22 VCC=3.3V");
     return;
   }
-  Serial.printf("[SCD41] Serial: 0x%04X%04X%04X\n", sn0, sn1, sn2);
+  Serial.printf("[SCD41] Serial: 0x%08X%08X\n", (uint32_t)(serialNumber >> 32), (uint32_t)(serialNumber & 0xFFFFFFFF));
 
   // Start periodic measurement (1 reading every ~5 s from SCD41)
   err = scd4x.startPeriodicMeasurement();
@@ -203,14 +203,14 @@ void setupSCD41() {
 void readSCD41() {
   if (!scd41Ready) return;
 
-  uint16_t err;
-  char     errMsg[64];
-  bool     isReady = false;
+  int16_t err;
+  char    errMsg[64];
+  bool    isReady = false;
 
-  err = scd4x.getDataReadyFlag(isReady);
+  err = scd4x.getDataReadyStatus(isReady);
   if (err) {
     errorToString(err, errMsg, sizeof(errMsg));
-    Serial.printf("[SCD41] getDataReadyFlag error: %s\n", errMsg);
+    Serial.printf("[SCD41] getDataReadyStatus error: %s\n", errMsg);
     return;
   }
   if (!isReady) return;  // not ready yet — check again next cycle

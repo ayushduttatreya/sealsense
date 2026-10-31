@@ -39,6 +39,7 @@ from .reference_dataset import (
 from .synthetic_generator import (
     generate_synthetic_impulse_wav, generate_synthetic_chirp_wav
 )
+from .signal_analysis import analyze_signal, analyze_wav_bytes
 from .demo_data import get_demo_data, DEMO_DEVICES, BASE_ZONES
 from .alert_rules import evaluate_environmental
 from datetime import datetime, timezone, timedelta
@@ -765,10 +766,23 @@ async def run_acoustic_inference(req: AcousticInferenceRequest):
     status while extracting physical audio waveform metrics.
     """
     adapter = NocturneMiniAdapter()
-    return adapter.predict(req.audio_samples, sample_rate=req.sample_rate)
+    res = adapter.predict(req.audio_samples, sample_rate=req.sample_rate)
+    try:
+        import numpy as np
+        res.signal_analysis = analyze_signal(np.array(req.audio_samples, dtype=np.float32), sample_rate=req.sample_rate)
+    except Exception as e:
+        log.warning("Could not calculate signal analysis for raw array: %s", e)
+    res.recording_domain = "airborne_microphone"
+    return res
 
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB max WAV upload
+
+
+def _extract_form_val(val, default=None):
+    if hasattr(val, "default"):
+        return val.default if val.default is not ... else default
+    return val if val is not None else default
 
 
 def _is_truthy(val) -> bool:
@@ -790,6 +804,7 @@ async def upload_acoustic_recording(
     retain_sample: bool = Form(False, description="Persist original WAV recording to audio sample storage for dataset collection"),
     is_synthetic: bool = Form(False, description="Explicit flag indicating whether the sample is a synthetic test signal"),
     input_source: Optional[str] = Form("user_upload", description="Origin of audio: user_upload, hardware_recording, or synthetic"),
+    recording_domain: Optional[str] = Form(None, description="Recording domain: airborne_microphone, accelerometer, etc."),
 ):
     """
     Ingests, validates, resamples, and executes Nocturne Mini bioacoustic inference
@@ -804,12 +819,16 @@ async def upload_acoustic_recording(
     - Resamples to 16 kHz
     - Standardizes to a 10.0s window (pads with silence if short, truncates if long)
     - Returns rich metadata (original duration, sample rate, channels, waveform preview, top 5 predictions)
+    - Computes physical acoustic signal characteristics (RMS, peak amplitude, centroid, bandwidth, flatness, ZCR, band energy, impulses)
     - Optionally retains original recording on disk outside SQLite when retain_sample=True
     """
     should_retain = _is_truthy(retain_sample)
     should_save_event = _is_truthy(save_event)
     synthetic_flag = _is_truthy(is_synthetic)
-    source_val = input_source.default if hasattr(input_source, "default") else input_source
+    source_val = _extract_form_val(input_source, "user_upload")
+    zone_val = _extract_form_val(zone_id, "zone-a")
+    device_val = _extract_form_val(device_id, "esp32-zone-a-01")
+    rec_dom_val = _extract_form_val(recording_domain, None)
 
     if not file.filename:
         raise HTTPException(
@@ -851,6 +870,23 @@ async def upload_acoustic_recording(
 
     source_type = "synthetic" if synthetic_flag or source_val == "synthetic" else (source_val or "user_upload")
 
+    # Domain separation determination
+    if synthetic_flag or source_type == "synthetic":
+        domain_val = "synthetic_simulation"
+    elif rec_dom_val:
+        domain_val = rec_dom_val
+    elif source_type in ("hardware_recording", "user_upload", "live_stream", "field_recording"):
+        domain_val = "airborne_microphone"
+    else:
+        domain_val = "unknown"
+
+    # Compute physical acoustic signal characteristics
+    try:
+        sig_analysis = analyze_wav_bytes(contents)
+    except Exception as sig_err:
+        log.warning("Could not compute signal analysis for upload: %s", sig_err)
+        sig_analysis = None
+
     adapter = NocturneMiniAdapter()
     result = adapter.predict_wav_bytes(
         contents,
@@ -858,6 +894,9 @@ async def upload_acoustic_recording(
         input_source=source_type,
         top_k=5,
     )
+
+    result.recording_domain = domain_val
+    result.signal_analysis = sig_analysis
 
     if result.status == "ERROR":
         raise HTTPException(
@@ -893,6 +932,7 @@ async def upload_acoustic_recording(
                     ]
                     peaks_json = json.dumps(peaks_clean)
                     top_preds_json = json.dumps([p.model_dump() for p in result.top_predictions])
+                    sig_json = json.dumps(sig_analysis) if sig_analysis else None
 
                     await db.execute(
                         """
@@ -900,10 +940,10 @@ async def upload_acoustic_recording(
                             id, filename, stored_filename, file_size_bytes, sha256_hash,
                             duration_sec, sample_rate, channels, format, timestamp,
                             recording_timestamp, zone_id, device_id, input_source,
-                            is_synthetic, model_id, model_version, prediction, score,
+                            is_synthetic, recording_domain, model_id, model_version, prediction, score,
                             confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
-                            review_status, ground_truth_label, verification_method, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            signal_analysis, review_status, ground_truth_label, verification_method, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             sample_id,
@@ -917,10 +957,11 @@ async def upload_acoustic_recording(
                             "WAV",
                             now_iso,
                             now_iso,
-                            zone_id or "zone-a",
-                            device_id or "esp32-zone-a-01",
+                            zone_val or "zone-a",
+                            device_val or "esp32-zone-a-01",
                             source_type,
                             1 if source_type == "synthetic" else 0,
+                            domain_val,
                             result.model_id,
                             result.model_id,
                             result.prediction,
@@ -929,6 +970,7 @@ async def upload_acoustic_recording(
                             top_preds_json,
                             wf_json,
                             peaks_json,
+                            sig_json,
                             "UNREVIEWED",
                             "UNREVIEWED",
                             "unverified",
@@ -936,11 +978,12 @@ async def upload_acoustic_recording(
                         ),
                     )
                     await db.commit()
-                    log.info("Persisted audio sample %s into dataset library", sample_id)
+                    log.info("Persisted audio sample %s into dataset library with domain %s", sample_id, domain_val)
                 except Exception as store_err:
                     log.error("Failed to store audio sample on disk/DB: %s", store_err)
                     # We do not fail inference if storage encounters an issue, but log it
                     sample_id = None
+
 
         if sample_id:
             result.audio_sample_id = sample_id
@@ -1000,7 +1043,7 @@ async def upload_acoustic_recording(
 
 def _row_to_audio_sample(row) -> RetainedAudioSample:
     d = dict(row)
-    for field in ("top_predictions", "waveform_preview", "spectrogram_peaks"):
+    for field in ("top_predictions", "waveform_preview", "spectrogram_peaks", "signal_analysis"):
         val = d.get(field)
         if isinstance(val, str):
             try:
@@ -1008,6 +1051,7 @@ def _row_to_audio_sample(row) -> RetainedAudioSample:
             except Exception:
                 d[field] = [] if field == "top_predictions" else None
     d["is_synthetic"] = bool(d.get("is_synthetic", 0))
+    d["recording_domain"] = d.get("recording_domain") or "unknown"
     return RetainedAudioSample(**d)
 
 
@@ -1292,6 +1336,15 @@ async def import_reference_sample(req: ReferenceImportRequest):
     result.source_citation = item["citation"]
     result.source_url = item["source_url"]
     result.transducer_type = item["transducer_type"]
+    result.recording_domain = item.get("recording_domain", "unknown")
+
+    # Compute physical acoustic signal characteristics
+    try:
+        sig_analysis = analyze_wav_bytes(wav_bytes)
+    except Exception as sig_err:
+        log.warning("Could not compute signal analysis for reference sample: %s", sig_err)
+        sig_analysis = None
+    result.signal_analysis = sig_analysis
 
     sample_id = None
     if req.retain_sample:
@@ -1318,6 +1371,7 @@ async def import_reference_sample(req: ReferenceImportRequest):
                     ]
                     peaks_json = json.dumps(peaks_clean)
                     top_preds_json = json.dumps([p.model_dump() for p in result.top_predictions])
+                    sig_json = json.dumps(sig_analysis) if sig_analysis else None
                     ev_notes = req.notes or f"USDA Bug Bytes reference recording of {item['species']} ({item['life_stage']}). Substrate: {item['substrate']}. Transducer: {item['transducer_type']}."
 
                     await db.execute(
@@ -1326,12 +1380,12 @@ async def import_reference_sample(req: ReferenceImportRequest):
                             id, filename, stored_filename, file_size_bytes, sha256_hash,
                             duration_sec, sample_rate, channels, format, timestamp,
                             recording_timestamp, zone_id, device_id, input_source,
-                            is_synthetic, model_id, model_version, prediction, score,
+                            is_synthetic, recording_domain, model_id, model_version, prediction, score,
                             confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
-                            review_status, ground_truth_label, verification_method, reviewer,
+                            signal_analysis, review_status, ground_truth_label, verification_method, reviewer,
                             reviewed_at, evidence_notes, dataset_name, source_species,
                             source_citation, source_url, transducer_type, source_category, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             sample_id,
@@ -1349,6 +1403,7 @@ async def import_reference_sample(req: ReferenceImportRequest):
                             req.device_id,
                             "public_reference",
                             0,
+                            item.get("recording_domain", "unknown"),
                             result.model_id,
                             result.model_id,
                             result.prediction,
@@ -1357,6 +1412,7 @@ async def import_reference_sample(req: ReferenceImportRequest):
                             top_preds_json,
                             wf_json,
                             peaks_json,
+                            sig_json,
                             "REVIEWED",
                             "TARGET_PEST_OBSERVED",
                             "laboratory_reared_culture",
@@ -1373,7 +1429,7 @@ async def import_reference_sample(req: ReferenceImportRequest):
                         ),
                     )
                     await db.commit()
-                    log.info("Persisted USDA Bug Bytes reference sample %s into library", sample_id)
+                    log.info("Persisted USDA Bug Bytes reference sample %s into library with domain %s", sample_id, item.get("recording_domain"))
                 except Exception as store_err:
                     log.error("Failed to store reference audio sample: %s", store_err)
                     sample_id = None
@@ -1383,6 +1439,39 @@ async def import_reference_sample(req: ReferenceImportRequest):
             result.is_retained = True
 
     return result
+
+
+@app.get("/api/reference/{catalog_id}/analysis")
+async def get_reference_signal_analysis(catalog_id: str):
+    """
+    Computes and returns physical acoustic signal characteristics
+    (RMS, peak amplitude, spectral centroid, bandwidth, flatness, ZCR, band energy distribution, and transient impulse counts)
+    for an authentic USDA reference recording without biological diagnosis claims.
+    """
+    item = get_catalog_item(catalog_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Reference catalog item '{catalog_id}' not found.")
+    
+    file_path = get_reference_file_path(item["filename"])
+    if not file_path or not os.path.isfile(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reference audio file '{item['filename']}' is not present locally on disk."
+        )
+
+    with open(file_path, "rb") as f:
+        wav_bytes = f.read()
+
+    analysis = analyze_wav_bytes(wav_bytes)
+    return {
+        "catalog_id": item["id"],
+        "filename": item["filename"],
+        "species": item["species"],
+        "common_name": item["common_name"],
+        "transducer_type": item["transducer_type"],
+        "recording_domain": item.get("recording_domain", "unknown"),
+        "analysis": analysis,
+    }
 
 
 # ─── Synthetic Bioacoustic Simulation Scenario Generator APIs ─────
@@ -1402,6 +1491,13 @@ async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
         seed=req.seed,
     )
 
+    # Compute physical acoustic signal characteristics
+    try:
+        sig_analysis = analyze_wav_bytes(wav_bytes)
+    except Exception as sig_err:
+        log.warning("Could not compute signal analysis for synthetic simulation: %s", sig_err)
+        sig_analysis = None
+
     adapter = NocturneMiniAdapter()
     result = adapter.predict_wav_bytes(
         wav_bytes,
@@ -1411,6 +1507,8 @@ async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
     )
 
     result.input_source = "synthetic"
+    result.recording_domain = "synthetic_simulation"
+    result.signal_analysis = sig_analysis
     result.simulation_params = {
         "impulse_rate": req.impulse_rate,
         "amplitude": req.amplitude,
@@ -1437,6 +1535,7 @@ async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
             ]
             peaks_json = json.dumps(peaks_clean)
             top_preds_json = json.dumps([p.model_dump() for p in result.top_predictions])
+            sig_json = json.dumps(sig_analysis) if sig_analysis else None
 
             await db.execute(
                 """
@@ -1444,11 +1543,11 @@ async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
                     id, filename, stored_filename, file_size_bytes, sha256_hash,
                     duration_sec, sample_rate, channels, format, timestamp,
                     recording_timestamp, zone_id, device_id, input_source,
-                    is_synthetic, model_id, model_version, prediction, score,
+                    is_synthetic, recording_domain, model_id, model_version, prediction, score,
                     confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
-                    review_status, ground_truth_label, verification_method, reviewer,
+                    signal_analysis, review_status, ground_truth_label, verification_method, reviewer,
                     reviewed_at, evidence_notes, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sample_id,
@@ -1466,6 +1565,7 @@ async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
                     req.device_id,
                     "synthetic",
                     1,
+                    "synthetic_simulation",
                     result.model_id,
                     result.model_id,
                     result.prediction,
@@ -1474,6 +1574,7 @@ async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
                     top_preds_json,
                     wf_json,
                     peaks_json,
+                    sig_json,
                     "REVIEWED",
                     "INCONCLUSIVE",
                     "unverified",
@@ -1659,18 +1760,33 @@ async def seed_demo_audio_samples():
             peaks_preview = json.dumps([{"freq_hz": item["freq_center"], "db": -24.5}])
             top_preds = json.dumps([{"label": item["prediction"], "score": item["score"]}])
 
+            sig_analysis = None
+            try:
+                sig_analysis = analyze_wav_bytes(wav_bytes)
+            except Exception as e:
+                log.warning("Could not analyze seeded sample: %s", e)
+
+            domain_val = item.get("recording_domain")
+            if not domain_val:
+                if item.get("is_synthetic"):
+                    domain_val = "synthetic_simulation"
+                elif item.get("input_source") == "public_reference":
+                    domain_val = "accelerometer"
+                else:
+                    domain_val = "unknown"
+
             await db.execute(
                 """
                 INSERT INTO retained_audio_samples (
                     id, filename, stored_filename, file_size_bytes, sha256_hash,
                     duration_sec, sample_rate, channels, format, timestamp,
                     recording_timestamp, zone_id, device_id, input_source,
-                    is_synthetic, model_id, model_version, prediction, score,
+                    is_synthetic, recording_domain, model_id, model_version, prediction, score,
                     confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
-                    review_status, ground_truth_label, verification_method, reviewer,
+                    signal_analysis, review_status, ground_truth_label, verification_method, reviewer,
                     reviewed_at, evidence_notes, dataset_name, source_species,
                     source_citation, source_url, transducer_type, source_category, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sample_id,
@@ -1688,6 +1804,7 @@ async def seed_demo_audio_samples():
                     item["device_id"],
                     item["input_source"],
                     item["is_synthetic"],
+                    domain_val,
                     "stratus-labs/nocturne-v1-mini",
                     "nocturne-v1-mini (EXPERIMENTAL)",
                     item["prediction"],
@@ -1696,6 +1813,7 @@ async def seed_demo_audio_samples():
                     top_preds,
                     wf_preview,
                     peaks_preview,
+                    json.dumps(sig_analysis) if sig_analysis else None,
                     "REVIEWED" if item["ground_truth_label"] != "UNREVIEWED" else "UNREVIEWED",
                     item["ground_truth_label"],
                     item["verification_method"],
@@ -1709,13 +1827,14 @@ async def seed_demo_audio_samples():
                     item.get("transducer_type"),
                     item.get("source_category"),
                     now.isoformat(),
-                )
+                ),
             )
             count += 1
 
         await db.commit()
 
     return {"seeded": count, "message": f"Successfully seeded {count} demo audio samples with physical ground-truth annotations"}
+
 
 
 

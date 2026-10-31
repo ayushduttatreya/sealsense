@@ -77,6 +77,7 @@ export const api = {
     saveEvent = false,
     retainSample = false,
     isSynthetic = false,
+    recordingDomain?: import('../types').RecordingDomain,
   ) => {
     const formData = new FormData();
     formData.append('file', file, filename);
@@ -86,6 +87,9 @@ export const api = {
     formData.append('retain_sample', String(retainSample));
     formData.append('is_synthetic', String(isSynthetic));
     formData.append('input_source', isSynthetic ? 'synthetic' : 'user_upload');
+    if (recordingDomain) {
+      formData.append('recording_domain', recordingDomain);
+    }
     const res = await fetch(`${BASE}/api/inference/acoustic/upload`, {
       method: 'POST',
       body: formData,
@@ -143,6 +147,16 @@ export const api = {
   referenceCatalog: () =>
     request<import('../types').ReferenceAudioCatalogItem[]>('/api/reference/catalog'),
   referenceAudioUrl: (catalogId: string) => `${BASE}/api/reference/${catalogId}/audio`,
+  referenceAnalysis: (catalogId: string) =>
+    request<{
+      catalog_id: string;
+      filename: string;
+      species: string;
+      common_name: string;
+      transducer_type: string;
+      recording_domain: string;
+      analysis: import('../types').SignalAnalysisResult;
+    }>(`/api/reference/${catalogId}/analysis`),
   importReference: (payload: import('../types').ReferenceImportRequest) =>
     request<import('../types').AcousticInferenceResult>('/api/reference/import', {
       method: 'POST',

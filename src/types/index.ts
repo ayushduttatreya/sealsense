@@ -85,18 +85,56 @@ export interface PredictionItem {
   score: number;
 }
 
+export type RecordingDomain =
+  | 'airborne_microphone'
+  | 'accelerometer'
+  | 'piezoelectric'
+  | 'pvdf'
+  | 'ultrasonic_transducer'
+  | 'synthetic_simulation'
+  | 'unknown';
+
+export interface SignalAnalysisResult {
+  rms_energy: number;
+  rms_db: number;
+  peak_amplitude: number;
+  peak_dbfs: number;
+  spectral_centroid_hz: number;
+  spectral_bandwidth_hz: number;
+  spectral_flatness: number;
+  zero_crossing_rate: number;
+  zero_crossings_per_sec: number;
+  band_energy_distribution: {
+    sub_1k_pct: number;
+    band_1k_4k_pct: number;
+    band_4k_8k_pct: number;
+    ultrasonic_8k_plus_pct: number;
+    sub_1khz_pct?: number;
+    band_1k_to_4k_pct?: number;
+    band_4k_to_8k_pct?: number;
+    ultrasonic_gt_8k_pct?: number;
+  };
+  transient_click_count: number;
+  transient_clicks_per_sec: number;
+  transient_detection_method: string;
+  duration_sec: number;
+  analyzed_sample_rate: number;
+  method_notes?: string;
+  scientific_disclaimer?: string;
+}
+
 export interface AcousticInferenceResult {
   status: 'READY' | 'UNAVAILABLE' | 'EXPERIMENTAL' | 'ERROR';
   model_id: string;
   prediction: string;
-  score: number | null;
+  score?: number | null;
   score_semantics: string;
   top_predictions: PredictionItem[];
   confidence_band: 'low' | 'medium' | 'high' | 'uncertain';
-  inference_duration_ms?: number;
+  inference_duration_ms?: number | null;
   audio_sample_rate: number;
   audio_duration_sec: number;
-  waveform_preview?: number[];
+  waveform_preview?: number[] | null;
   spectrogram_peaks?: { frequency_hz?: number; freq_hz?: number; magnitude_db?: number; db?: number }[];
   limitations: string;
   error?: string | null;
@@ -114,7 +152,9 @@ export interface AcousticInferenceResult {
   source_citation?: string | null;
   source_url?: string | null;
   transducer_type?: string | null;
+  recording_domain?: RecordingDomain;
   simulation_params?: Record<string, any> | null;
+  signal_analysis?: SignalAnalysisResult | null;
 }
 
 // ─── Retained Audio Dataset & Evaluation ──────────────────────────────────────
@@ -149,6 +189,7 @@ export interface RetainedAudioSample {
   device_id: string;
   input_source: 'user_upload' | 'hardware_recording' | 'synthetic' | 'public_reference';
   is_synthetic: boolean;
+  recording_domain?: RecordingDomain;
   model_id?: string | null;
   model_version?: string | null;
   prediction?: string | null;
@@ -157,6 +198,7 @@ export interface RetainedAudioSample {
   top_predictions: PredictionItem[];
   waveform_preview?: number[] | null;
   spectrogram_peaks?: { freq_hz?: number; db?: number }[] | null;
+  signal_analysis?: SignalAnalysisResult | null;
   review_status: 'UNREVIEWED' | 'REVIEWED';
   ground_truth_label: GroundTruthLabel;
   verification_method: VerificationMethod;
@@ -181,6 +223,11 @@ export interface ReferenceAudioCatalogItem {
   life_stage: string;
   substrate: string;
   transducer_type: string;
+  recording_domain: RecordingDomain;
+  frequency_range?: string | null;
+  sample_width_bits?: number | null;
+  sample_width_bytes?: number | null;
+  laboratory_setup?: string | null;
   category: string;
   description: string;
   duration_sec: number;
@@ -218,11 +265,20 @@ export interface SyntheticImpulseRequest {
 
 export interface DatasetEvaluationReport {
   timestamp: string;
+  validation_readiness: string;
+  target_evaluation_domain: string;
   total_samples: number;
+  total_reference_recordings: number;
+  total_synthetic_recordings: number;
+  total_hardware_recordings: number;
   eligible_samples: number;
   excluded_samples: number;
+  eligible_recording_domains: string[];
+  domain_breakdown: Record<string, number>;
+  transducer_breakdown: Record<string, number>;
   exclusion_breakdown: Record<string, number>;
   label_distribution: Record<string, number>;
+  independent_biological_labels: Record<string, number>;
   vocabulary_alignment: string;
   anomaly_threshold: number;
   anomaly_metrics?: {

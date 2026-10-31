@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS retained_audio_samples (
     source_url TEXT,
     transducer_type TEXT,
     source_category TEXT,
+    recording_domain TEXT NOT NULL DEFAULT 'unknown',
+    signal_analysis TEXT,
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_retained_audio_hash ON retained_audio_samples(sha256_hash);
@@ -147,6 +149,8 @@ async def init_db():
             ("retained_audio_samples", "source_url", "TEXT"),
             ("retained_audio_samples", "transducer_type", "TEXT"),
             ("retained_audio_samples", "source_category", "TEXT"),
+            ("retained_audio_samples", "recording_domain", "TEXT NOT NULL DEFAULT 'unknown'"),
+            ("retained_audio_samples", "signal_analysis", "TEXT"),
         ]
         for table, col, col_def in migrations:
             try:
@@ -154,6 +158,11 @@ async def init_db():
             except Exception:
                 # Column already exists
                 pass
+
+        try:
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_retained_audio_domain ON retained_audio_samples(recording_domain)")
+        except Exception:
+            pass
 
         await db.commit()
 

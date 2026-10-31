@@ -4,14 +4,14 @@ import {
   Activity, Volume2, CheckCheck, ShieldAlert, Layers,
   Upload, FileAudio, AlertTriangle, Sparkles, Loader2, RefreshCw,
   Database, Trash2, Download, Search, Filter, Edit3, BarChart3,
-  CheckCircle2, BookOpen, ExternalLink, Play
+  CheckCircle2, BookOpen, ExternalLink, Play, ChevronDown, ChevronUp
 } from 'lucide-react';
 import { SourceBadge } from '../components/SourceBadge';
 import { api } from '../lib/api';
 import type {
   AcousticEvent, ValidationStatus, AcousticInferenceResult,
   RetainedAudioSample, GroundTruthLabel, VerificationMethod, DatasetEvaluationReport,
-  ReferenceAudioCatalogItem
+  ReferenceAudioCatalogItem, RecordingDomain, SignalAnalysisResult
 } from '../types';
 
 interface Props {
@@ -34,6 +34,161 @@ function bandColor(band: AcousticEvent['confidence_band']) {
     low: '#f97316', medium: '#eab308', high: '#22c55e', uncertain: '#6b7280',
   };
   return map[band] ?? '#6b7280';
+}
+
+function DomainBadge({ domain }: { domain?: RecordingDomain | string }) {
+  const d = (domain || 'unknown') as RecordingDomain;
+  const labelMap: Record<string, string> = {
+    airborne_microphone: '🎙️ Airborne Mic',
+    accelerometer: '⚡ Accelerometer',
+    piezoelectric: '💠 Piezo Disk',
+    pvdf: '📏 PVDF Film',
+    ultrasonic_transducer: '📡 Ultrasonic Sensor',
+    synthetic_simulation: '⚙️ Synthetic Sim',
+    unknown: '❓ Unknown Domain',
+  };
+  return (
+    <span className={`ss-domain-badge ${d}`}>
+      {labelMap[d] ?? d}
+    </span>
+  );
+}
+
+function SignalAnalysisDisplay({ analysis, title = 'Physical Acoustic Signal Characteristics' }: { analysis: SignalAnalysisResult; title?: string }) {
+  const bands = analysis.band_energy_distribution || {
+    sub_1k_pct: 0,
+    band_1k_4k_pct: 0,
+    band_4k_8k_pct: 0,
+    ultrasonic_8k_plus_pct: 0,
+  };
+
+  return (
+    <div className="ss-signal-card">
+      <div className="ss-signal-header">
+        <span className="ss-signal-title">
+          <Activity size={14} style={{ color: 'var(--accent-light)' }} />
+          {title}
+        </span>
+        <span className="ss-signal-badge">
+          Deterministic Signal Metrics (Non-Biological)
+        </span>
+      </div>
+
+      <div className="ss-signal-grid">
+        <div className="ss-signal-box">
+          <div className="ss-signal-val">
+            {analysis.rms_energy.toFixed(4)} <span className="ss-text-muted ss-text-xs">({analysis.rms_db.toFixed(1)} dB)</span>
+          </div>
+          <div className="ss-signal-label">RMS Energy</div>
+        </div>
+
+        <div className="ss-signal-box">
+          <div className="ss-signal-val">
+            {analysis.peak_amplitude.toFixed(4)} <span className="ss-text-muted ss-text-xs">({analysis.peak_dbfs.toFixed(1)} dBFS)</span>
+          </div>
+          <div className="ss-signal-label">Peak Amplitude</div>
+        </div>
+
+        <div className="ss-signal-box">
+          <div className="ss-signal-val">
+            {analysis.spectral_centroid_hz.toFixed(0)} <span className="ss-text-muted ss-text-xs">Hz</span>
+          </div>
+          <div className="ss-signal-label">Spectral Centroid</div>
+        </div>
+
+        <div className="ss-signal-box">
+          <div className="ss-signal-val">
+            {analysis.spectral_bandwidth_hz.toFixed(0)} <span className="ss-text-muted ss-text-xs">Hz</span>
+          </div>
+          <div className="ss-signal-label">Spectral Bandwidth</div>
+        </div>
+
+        <div className="ss-signal-box">
+          <div className="ss-signal-val">
+            {analysis.spectral_flatness.toFixed(4)}
+          </div>
+          <div className="ss-signal-label">Spectral Flatness (Wiener)</div>
+        </div>
+
+        <div className="ss-signal-box">
+          <div className="ss-signal-val">
+            {(analysis.zero_crossing_rate * 100).toFixed(1)}% <span className="ss-text-muted ss-text-xs">({analysis.zero_crossings_per_sec.toFixed(0)}/s)</span>
+          </div>
+          <div className="ss-signal-label">Zero-Crossing Rate</div>
+        </div>
+
+        <div className="ss-signal-box" style={{ borderColor: 'rgba(168, 85, 247, 0.35)' }}>
+          <div className="ss-signal-val" style={{ color: '#c084fc' }}>
+            {analysis.transient_click_count} <span className="ss-text-muted ss-text-xs">({analysis.transient_clicks_per_sec.toFixed(1)} cps)</span>
+          </div>
+          <div className="ss-signal-label">Transient Clicks / Impulses</div>
+        </div>
+
+        <div className="ss-signal-box">
+          <div className="ss-signal-val ss-text-xs" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={analysis.transient_detection_method}>
+            Hilbert Envelope + MAD
+          </div>
+          <div className="ss-signal-label">Detection Method</div>
+        </div>
+      </div>
+
+      {/* Multi-Band Energy Distribution Bar */}
+      <div style={{ marginTop: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+          <span>Frequency Band Energy Distribution</span>
+          <span>Total: 100%</span>
+        </div>
+        <div className="ss-band-bar">
+          <div
+            className="ss-band-segment sub1k"
+            style={{ width: `${Math.max(1, bands.sub_1k_pct)}%` }}
+            title={`Sub-1 kHz: ${bands.sub_1k_pct.toFixed(1)}%`}
+          />
+          <div
+            className="ss-band-segment band1_4k"
+            style={{ width: `${Math.max(1, bands.band_1k_4k_pct)}%` }}
+            title={`1–4 kHz: ${bands.band_1k_4k_pct.toFixed(1)}%`}
+          />
+          <div
+            className="ss-band-segment band4_8k"
+            style={{ width: `${Math.max(1, bands.band_4k_8k_pct)}%` }}
+            title={`4–8 kHz: ${bands.band_4k_8k_pct.toFixed(1)}%`}
+          />
+          <div
+            className="ss-band-segment ultra8k"
+            style={{ width: `${Math.max(1, bands.ultrasonic_8k_plus_pct)}%` }}
+            title={`Ultrasonic >8 kHz: ${bands.ultrasonic_8k_plus_pct.toFixed(1)}%`}
+          />
+        </div>
+        <div className="ss-band-legend">
+          <div className="ss-band-legend-item">
+            <span className="ss-band-dot sub1k" />
+            <span>&lt; 1 kHz ({bands.sub_1k_pct.toFixed(1)}%)</span>
+          </div>
+          <div className="ss-band-legend-item">
+            <span className="ss-band-dot band1_4k" />
+            <span>1–4 kHz ({bands.band_1k_4k_pct.toFixed(1)}%)</span>
+          </div>
+          <div className="ss-band-legend-item">
+            <span className="ss-band-dot band4_8k" />
+            <span>4–8 kHz ({bands.band_4k_8k_pct.toFixed(1)}%)</span>
+          </div>
+          <div className="ss-band-legend-item">
+            <span className="ss-band-dot ultra8k" />
+            <span>&gt; 8 kHz ({bands.ultrasonic_8k_plus_pct.toFixed(1)}%)</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Impulse methodology note & Scientific disclaimer */}
+      <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+        <div><strong>Transient Methodology:</strong> {analysis.transient_detection_method}</div>
+        <div style={{ marginTop: '3px', color: '#f59e0b' }}>
+          <strong>Acoustic Signal Notice:</strong> Measurements indicate physical waveform properties (amplitude, spectral centroid, band energy, envelope transients). These are acoustic signal characteristics, not biological diagnoses or confirmed pest infestations.
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function generateSyntheticWavBlob(durationSec = 10.0, sampleRate = 16000): Blob {
@@ -91,6 +246,10 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
   const [refCatalog, setRefCatalog] = useState<ReferenceAudioCatalogItem[]>([]);
   const [loadingCatalog, setLoadingCatalog] = useState<boolean>(false);
   const [importingRefId, setImportingRefId] = useState<string | null>(null);
+  const [refAnalysisMap, setRefAnalysisMap] = useState<Record<string, SignalAnalysisResult>>({});
+  const [loadingRefAnalysis, setLoadingRefAnalysis] = useState<Record<string, boolean>>({});
+  const [expandedRefAnalysis, setExpandedRefAnalysis] = useState<Record<string, boolean>>({});
+  const [expandedSampleAnalysis, setExpandedSampleAnalysis] = useState<Record<string, boolean>>({});
 
   // Synthetic Bioacoustic Impulse Scenario State
   const [simImpulseRate, setSimImpulseRate] = useState<number>(12.0);
@@ -165,6 +324,27 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
       console.error('Failed to load reference audio catalog', err);
     } finally {
       setLoadingCatalog(false);
+    }
+  };
+
+  const handleToggleRefAnalysis = async (catalogId: string) => {
+    if (expandedRefAnalysis[catalogId]) {
+      setExpandedRefAnalysis(prev => ({ ...prev, [catalogId]: false }));
+      return;
+    }
+    if (!refAnalysisMap[catalogId]) {
+      setLoadingRefAnalysis(prev => ({ ...prev, [catalogId]: true }));
+      try {
+        const data = await api.referenceAnalysis(catalogId);
+        setRefAnalysisMap(prev => ({ ...prev, [catalogId]: data.analysis }));
+        setExpandedRefAnalysis(prev => ({ ...prev, [catalogId]: true }));
+      } catch (err) {
+        console.error('Failed to load reference signal analysis', err);
+      } finally {
+        setLoadingRefAnalysis(prev => ({ ...prev, [catalogId]: false }));
+      }
+    } else {
+      setExpandedRefAnalysis(prev => ({ ...prev, [catalogId]: true }));
     }
   };
 
@@ -580,9 +760,12 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                               {item.common_name} · <span className="ss-mono ss-text-xs">{item.life_stage}</span>
                             </div>
                           </div>
-                          <span className="ss-source-pill public_reference">
-                            {item.is_locally_available ? 'LOCAL DISK' : 'REMOTE'}
-                          </span>
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <DomainBadge domain={item.recording_domain} />
+                            <span className="ss-source-pill public_reference">
+                              {item.is_locally_available ? 'LOCAL DISK' : 'REMOTE'}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="ss-ref-details-grid">
@@ -595,16 +778,26 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                             <span className="ss-ref-detail-val">{item.transducer_type}</span>
                           </div>
                           <div className="ss-ref-detail-item">
-                            <span className="ss-ref-detail-label">Duration / Rate</span>
-                            <span className="ss-ref-detail-val">{item.duration_sec}s · {item.sample_rate.toLocaleString()} Hz</span>
+                            <span className="ss-ref-detail-label">Frequency Range</span>
+                            <span className="ss-ref-detail-val ss-mono ss-text-xs">{item.frequency_range || 'Laboratory Bandwidth'}</span>
                           </div>
                           <div className="ss-ref-detail-item">
-                            <span className="ss-ref-detail-label">File</span>
-                            <span className="ss-ref-detail-val ss-mono ss-text-xs">{item.filename}</span>
+                            <span className="ss-ref-detail-label">Laboratory Setup</span>
+                            <span className="ss-ref-detail-val">{item.laboratory_setup || 'Anechoic Chamber'}</span>
+                          </div>
+                          <div className="ss-ref-detail-item">
+                            <span className="ss-ref-detail-label">Format / Duration</span>
+                            <span className="ss-ref-detail-val">{item.sample_width_bits ? `${item.sample_width_bits}-bit` : '16-bit'} mono · {item.duration_sec}s · {item.sample_rate.toLocaleString()} Hz</span>
+                          </div>
+                          <div className="ss-ref-detail-item">
+                            <span className="ss-ref-detail-label">SHA-256 Checksum</span>
+                            <span className="ss-ref-detail-val ss-mono ss-text-xs" title={item.sha256_hash || ''}>
+                              {item.sha256_hash ? `${item.sha256_hash.slice(0, 14)}…` : item.filename}
+                            </span>
                           </div>
                         </div>
 
-                        <div className="ss-audio-player-mini" style={{ width: '100%', marginTop: '2px' }}>
+                        <div className="ss-audio-player-mini" style={{ width: '100%', marginTop: '4px' }}>
                           <audio
                             controls
                             preload="none"
@@ -613,16 +806,29 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                           />
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                          <a
-                            href={item.source_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="ss-text-xs"
-                            style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}
-                          >
-                            <ExternalLink size={11} /> Source Catalog
-                          </a>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', flexWrap: 'wrap', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <a
+                              href={item.source_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="ss-text-xs"
+                              style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px', textDecoration: 'none' }}
+                            >
+                              <ExternalLink size={11} /> Source Catalog
+                            </a>
+                            <button
+                              id={`btn-signal-ref-${item.id}`}
+                              className="ss-btn ss-btn-ghost ss-btn-xs"
+                              onClick={() => handleToggleRefAnalysis(item.id)}
+                              title="Calculate physical signal features (RMS, Peak, Centroid, Bandwidth, Impulses)"
+                            >
+                              <Activity size={12} />
+                              {expandedRefAnalysis[item.id] ? 'Hide Signal Features' : 'Inspect Signal Features'}
+                              {expandedRefAnalysis[item.id] ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                            </button>
+                          </div>
+
                           <button
                             id={`btn-import-ref-${item.id}`}
                             className="ss-btn ss-btn-primary ss-btn-xs"
@@ -640,6 +846,26 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                             )}
                           </button>
                         </div>
+
+                        {/* Inline Expandable Physical Signal Analysis */}
+                        {expandedRefAnalysis[item.id] && (
+                          <div style={{ marginTop: '10px' }}>
+                            {loadingRefAnalysis[item.id] ? (
+                              <div className="ss-empty" style={{ padding: '12px' }}>
+                                <Loader2 size={14} className="ss-spin" /> Calculating acoustic wave features…
+                              </div>
+                            ) : refAnalysisMap[item.id] ? (
+                              <SignalAnalysisDisplay
+                                analysis={refAnalysisMap[item.id]}
+                                title={`Physical Signal Characteristics: ${item.filename}`}
+                              />
+                            ) : (
+                              <div className="ss-empty" style={{ padding: '12px' }}>
+                                Signal analysis could not be retrieved.
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         <div className="ss-ref-citation-box">
                           {item.citation}
@@ -988,6 +1214,7 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                     <span style={{ fontWeight: 600, fontSize: '14px' }}>
                       {uploadResult.filename ?? 'audio_sample.wav'}
                     </span>
+                    <DomainBadge domain={uploadResult.recording_domain} />
                     {uploadResult.input_source === 'public_reference' && (
                       <span className="ss-source-pill public_reference">
                         📚 PUBLIC REFERENCE (USDA Bug Bytes)
@@ -1096,6 +1323,16 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                       <span>Noise: {uploadResult.simulation_params.noise_level}</span>
                       <span>Seed: {uploadResult.simulation_params.seed}</span>
                     </div>
+                  </div>
+                )}
+
+                {/* Physical Acoustic Signal Characteristics */}
+                {uploadResult.signal_analysis && (
+                  <div style={{ marginTop: '12px' }}>
+                    <SignalAnalysisDisplay
+                      analysis={uploadResult.signal_analysis}
+                      title={`Physical Signal Characteristics: ${uploadResult.filename ?? 'Ingested Audio'}`}
+                    />
                   </div>
                 )}
 
@@ -1644,21 +1881,47 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                 <div>
                   <h3 style={{ fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <BarChart3 size={16} style={{ color: 'var(--accent-light)' }} />
-                    Bioacoustic Dataset Evaluation Report
+                    Bioacoustic Dataset Evaluation Dashboard
                   </h3>
                   <div className="ss-text-xs ss-text-muted" style={{ marginTop: '2px' }}>
                     Generated at {new Date(evalReport.timestamp).toLocaleString()} · Anomaly Decision Threshold: <strong>{evalReport.anomaly_threshold}</strong>
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <DomainBadge domain={evalReport.target_evaluation_domain || 'airborne_microphone'} />
                   <span className="ss-badge ss-mono ss-text-xs">
                     Eligible: {evalReport.eligible_samples} / {evalReport.total_samples} samples
                   </span>
                 </div>
               </div>
 
+              {/* Validation Readiness Banner */}
+              {evalReport.validation_readiness === 'INSUFFICIENT VALIDATION DATA' ? (
+                <div className="ss-readiness-banner insufficient" style={{ marginTop: '14px', marginBottom: '14px' }}>
+                  <AlertTriangle size={22} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong style={{ fontSize: '13.5px', letterSpacing: '0.02em' }}>INSUFFICIENT VALIDATION DATA</strong>
+                    <div style={{ marginTop: '4px', fontSize: '12px', lineHeight: 1.45 }}>
+                      Valid, sensor-compatible evaluation dataset is not available for target domain <code>{evalReport.target_evaluation_domain}</code>.
+                      Diagnostic performance metrics (Accuracy, Precision, Recall, F1-score) are strictly suppressed.
+                      Laboratory reference recordings from contact sensors (accelerometer, PVDF film, piezoelectric disk, ultrasonic transducer) cannot validate an airborne MEMS microphone classifier. Synthetic simulations are excluded from scientific evaluation.
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="ss-readiness-banner valid" style={{ marginTop: '14px', marginBottom: '14px' }}>
+                  <CheckCircle2 size={22} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong style={{ fontSize: '13.5px' }}>VALID SENSOR-COMPATIBLE EVALUATION SET ({evalReport.target_evaluation_domain})</strong>
+                    <div style={{ marginTop: '4px', fontSize: '12px' }}>
+                      Evaluation dataset satisfies scientific provenance standards: sensor-compatible recordings with verified independent biological ground truth.
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Vocabulary & Guardrail Notice */}
-              <div className="ss-exp-banner ss-exp-banner-warn" style={{ marginTop: '14px', marginBottom: '14px' }}>
+              <div className="ss-exp-banner ss-exp-banner-warn" style={{ marginBottom: '14px' }}>
                 <ShieldAlert size={18} />
                 <div style={{ fontSize: '11.5px' }}>
                   <strong>TAXONOMIC VOCABULARY GUARDRAIL:</strong> {evalReport.vocabulary_alignment}
@@ -1671,37 +1934,124 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                   <div className="ss-eval-stat-val">{evalReport.total_samples}</div>
                   <div className="ss-eval-stat-label">Total Retained</div>
                 </div>
+                <div className="ss-eval-stat-box">
+                  <div className="ss-eval-stat-val" style={{ color: '#34d399' }}>
+                    {evalReport.provenance_breakdown?.public_reference || 0}
+                  </div>
+                  <div className="ss-eval-stat-label">Reference Recordings</div>
+                </div>
+                <div className="ss-eval-stat-box">
+                  <div className="ss-eval-stat-val" style={{ color: '#c084fc' }}>
+                    {evalReport.provenance_breakdown?.synthetic ?? 0}
+                  </div>
+                  <div className="ss-eval-stat-label">Synthetic Recordings</div>
+                </div>
+                <div className="ss-eval-stat-box">
+                  <div className="ss-eval-stat-val" style={{ color: 'var(--red)' }}>
+                    {evalReport.provenance_breakdown?.hardware_recording ?? 0}
+                  </div>
+                  <div className="ss-eval-stat-label">Hardware Recordings</div>
+                </div>
                 <div className="ss-eval-stat-box" style={{ borderColor: 'rgba(34, 197, 94, 0.4)' }}>
                   <div className="ss-eval-stat-val" style={{ color: 'var(--green)' }}>{evalReport.eligible_samples}</div>
-                  <div className="ss-eval-stat-label">Eligible Real Data</div>
+                  <div className="ss-eval-stat-label">Eligible ({evalReport.target_evaluation_domain})</div>
                 </div>
                 <div className="ss-eval-stat-box" style={{ borderColor: 'rgba(239, 68, 68, 0.3)' }}>
                   <div className="ss-eval-stat-val" style={{ color: 'var(--red)' }}>{evalReport.excluded_samples}</div>
                   <div className="ss-eval-stat-label">Excluded Samples</div>
                 </div>
-                <div className="ss-eval-stat-box">
-                  <div className="ss-eval-stat-val" style={{ color: '#c084fc' }}>
-                    {evalReport.exclusion_breakdown['synthetic_test_signal'] || 0}
+              </div>
+
+              {/* Scientific Provenance & Domain Breakdown Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginTop: '16px' }}>
+                {/* 1. Recordings by Transducer Type */}
+                <div style={{ background: 'var(--surface-color)', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px', color: 'var(--accent-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Activity size={14} /> Recordings by Transducer Type
                   </div>
-                  <div className="ss-eval-stat-label">Synthetic Excluded</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {evalReport.transducer_breakdown && Object.keys(evalReport.transducer_breakdown).length > 0 ? (
+                      Object.entries(evalReport.transducer_breakdown).map(([td, cnt]) => (
+                        <div key={td} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', padding: '2px 0' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>{td}</span>
+                          <span className="ss-mono" style={{ fontWeight: 600 }}>{cnt}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <span className="ss-text-xs ss-text-muted">No transducer data available</span>
+                    )}
+                  </div>
                 </div>
-                <div className="ss-eval-stat-box">
-                  <div className="ss-eval-stat-val" style={{ color: '#94a3b8' }}>
-                    {evalReport.exclusion_breakdown['unreviewed_sample'] || 0}
+
+                {/* 2. Recording Domains & Evaluation Eligibility */}
+                <div style={{ background: 'var(--surface-color)', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px', color: 'var(--accent-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Layers size={14} /> Domains & Evaluation Eligibility
                   </div>
-                  <div className="ss-eval-stat-label">Unreviewed Excluded</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {evalReport.domain_breakdown && Object.keys(evalReport.domain_breakdown).length > 0 ? (
+                      Object.entries(evalReport.domain_breakdown).map(([dom, cnt]) => {
+                        const isEligible = dom === evalReport.target_evaluation_domain;
+                        return (
+                          <div key={dom} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11.5px', padding: '2px 0' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <DomainBadge domain={dom} />
+                              <span style={{ fontSize: '10px', color: isEligible ? 'var(--green)' : 'var(--text-muted)' }}>
+                                {isEligible ? '✓ Target' : '✗ Incompatible'}
+                              </span>
+                            </div>
+                            <span className="ss-mono" style={{ fontWeight: 600 }}>{cnt}</span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <span className="ss-text-xs ss-text-muted">No domain data available</span>
+                    )}
+                  </div>
                 </div>
-                <div className="ss-eval-stat-box">
-                  <div className="ss-eval-stat-val" style={{ color: '#facc15' }}>
-                    {evalReport.exclusion_breakdown['inconclusive_observation'] || 0}
+
+                {/* 3. Exclusion Reasons */}
+                <div style={{ background: 'var(--surface-color)', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px', color: 'var(--accent-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ShieldAlert size={14} /> Evaluation Exclusion Reasons
                   </div>
-                  <div className="ss-eval-stat-label">Inconclusive Excluded</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {evalReport.exclusion_breakdown && Object.keys(evalReport.exclusion_breakdown).length > 0 ? (
+                      Object.entries(evalReport.exclusion_breakdown).map(([reason, cnt]) => (
+                        <div key={reason} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', padding: '2px 0' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>{reason.replace(/_/g, ' ')}</span>
+                          <span className="ss-mono" style={{ fontWeight: 600, color: 'var(--red)' }}>{cnt}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <span className="ss-text-xs ss-text-muted">Zero samples excluded</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Independent Biological Labels */}
+                <div style={{ background: 'var(--surface-color)', padding: '12px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, marginBottom: '8px', color: 'var(--accent-light)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <BookOpen size={14} /> Independent Biological Labels
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {evalReport.independent_biological_labels && Object.keys(evalReport.independent_biological_labels).length > 0 ? (
+                      Object.entries(evalReport.independent_biological_labels).map(([lbl, cnt]) => (
+                        <div key={lbl} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', padding: '2px 0' }}>
+                          <span style={{ color: 'var(--text-secondary)' }}>{lbl.replace(/_/g, ' ')}</span>
+                          <span className="ss-mono" style={{ fontWeight: 600 }}>{cnt}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <span className="ss-text-xs ss-text-muted">No biological labels recorded</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* Anomaly Detection Metrics (Confusion Matrix & Rates) */}
-              {evalReport.anomaly_metrics ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginTop: '16px' }}>
+              {evalReport.validation_readiness === 'VALID_EVALUATION_SET' && evalReport.anomaly_metrics && evalReport.anomaly_metrics.precision !== null ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginTop: '18px' }}>
                   <div>
                     <span className="ss-waveform-title" style={{ display: 'block', marginBottom: '8px' }}>
                       Anomaly Detection Confusion Matrix (vs. Physical Traps)
@@ -1759,9 +2109,16 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
                   </div>
                 </div>
               ) : (
-                <div className="ss-empty" style={{ margin: '14px 0' }}>
-                  No eligible real-world recordings with binary physical ground-truth (TARGET_PEST_OBSERVED or NO_TARGET_PEST_OBSERVED).
-                  Annotate physical observation findings on retained real samples below to compute classification metrics.
+                <div className="ss-empty" style={{ margin: '18px 0', border: '1px dashed rgba(239, 68, 68, 0.35)', padding: '22px' }}>
+                  <AlertTriangle size={22} style={{ color: 'var(--red)', marginBottom: '8px' }} />
+                  <div style={{ fontWeight: 700, fontSize: '13.5px', color: 'var(--red)' }}>
+                    Field Performance Metrics Suppressed — INSUFFICIENT VALIDATION DATA
+                  </div>
+                  <div className="ss-text-xs ss-text-muted" style={{ maxWidth: '640px', margin: '6px auto 0 auto', lineHeight: 1.5 }}>
+                    Accuracy, precision, recall, and F1-score cannot be claimed or displayed as field performance metrics.
+                    Zero eligible, sensor-compatible recordings ({evalReport.target_evaluation_domain}) possess verified binary physical ground truth.
+                    Physical reference recordings from contact sensors and synthetic simulations are excluded from model validation.
+                  </div>
                 </div>
               )}
 
@@ -1851,108 +2208,131 @@ export function AcousticMonitoring({ events, onValidate, onBatchReview }: Props)
               </div>
 
               {filteredSamples.map(sample => (
-                <div key={sample.id} className="ss-sample-row" id={`sample-row-${sample.id}`}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <FileAudio size={14} style={{ color: 'var(--accent-light)' }} />
-                      <strong style={{ fontSize: '13px' }} title={sample.filename}>{sample.filename}</strong>
-                    </div>
-                    <div className="ss-text-xs ss-mono ss-text-muted" style={{ marginTop: '2px' }}>
-                      ID: {sample.id} · SHA: {sample.sha256_hash.slice(0, 10)}…
-                    </div>
-                    <div style={{ marginTop: '4px', display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                      {sample.input_source === 'public_reference' && (
-                        <span className="ss-source-pill public_reference">
-                          📚 USDA Bug Bytes
-                        </span>
-                      )}
-                      {sample.input_source === 'synthetic' && (
-                        <span className="ss-source-pill synthetic">
-                          ⚡ Synthetic (Excluded)
-                        </span>
-                      )}
-                      {sample.input_source === 'user_upload' && (
-                        <span className="ss-source-pill user_upload">
-                          📁 User Upload
-                        </span>
-                      )}
-                      {sample.input_source === 'hardware_recording' && (
-                        <span className="ss-source-pill hardware_recording">
-                          🎙️ Hardware
-                        </span>
-                      )}
-                    </div>
-                    {sample.source_species && (
-                      <div className="ss-text-xs" style={{ color: '#34d399', marginTop: '3px' }}>
-                        <em>{sample.source_species}</em> · <span className="ss-text-muted">{sample.transducer_type || 'contact sensor'}</span>
+                <div key={sample.id} style={{ display: 'contents' }}>
+                  <div className="ss-sample-row" id={`sample-row-${sample.id}`}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <FileAudio size={14} style={{ color: 'var(--accent-light)' }} />
+                        <strong style={{ fontSize: '13px' }} title={sample.filename}>{sample.filename}</strong>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="ss-audio-player-mini">
-                    <audio
-                      controls
-                      preload="none"
-                      src={api.getAudioSampleUrl(sample.id)}
-                    />
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 600 }}>{sample.duration_sec.toFixed(1)}s</div>
-                    <div className="ss-text-xs ss-text-muted">
-                      {sample.sample_rate.toLocaleString()} Hz · {sample.channels === 1 ? 'Mono' : `${sample.channels} Ch`}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ fontSize: '12px' }}>
-                      <strong>Method:</strong> <span className="ss-mono ss-text-xs">{sample.verification_method || 'unverified'}</span>
-                    </div>
-                    {sample.evidence_notes ? (
-                      <div className="ss-text-xs ss-text-muted" style={{ fontStyle: 'italic', marginTop: '2px' }} title={sample.evidence_notes}>
-                        "{sample.evidence_notes.length > 55 ? `${sample.evidence_notes.slice(0, 55)}…` : sample.evidence_notes}"
+                      <div className="ss-text-xs ss-mono ss-text-muted" style={{ marginTop: '2px' }}>
+                        ID: {sample.id} · SHA: {sample.sha256_hash.slice(0, 10)}…
                       </div>
-                    ) : (
-                      <div className="ss-text-xs ss-text-muted">No evidence notes recorded</div>
-                    )}
-                    {sample.reviewer && (
-                      <div className="ss-text-xs" style={{ color: 'var(--accent-light)', marginTop: '2px' }}>
-                        By: {sample.reviewer}
+                      <div style={{ marginTop: '4px', display: 'flex', gap: '4px', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <DomainBadge domain={sample.recording_domain} />
+                        {sample.input_source === 'public_reference' && (
+                          <span className="ss-source-pill public_reference">
+                            📚 USDA Bug Bytes
+                          </span>
+                        )}
+                        {sample.input_source === 'synthetic' && (
+                          <span className="ss-source-pill synthetic">
+                            ⚡ Synthetic (Excluded)
+                          </span>
+                        )}
+                        {sample.input_source === 'user_upload' && (
+                          <span className="ss-source-pill user_upload">
+                            📁 User Upload
+                          </span>
+                        )}
+                        {sample.input_source === 'hardware_recording' && (
+                          <span className="ss-source-pill hardware_recording">
+                            🎙️ Hardware
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </div>
+                      {sample.source_species && (
+                        <div className="ss-text-xs" style={{ color: '#34d399', marginTop: '3px' }}>
+                          <em>{sample.source_species}</em> · <span className="ss-text-muted">{sample.transducer_type || 'contact sensor'}</span>
+                        </div>
+                      )}
+                    </div>
 
-                  <div>
-                    <div style={{ fontSize: '12px', fontWeight: 600 }}>{sample.prediction || 'N/A'}</div>
-                    <div className="ss-text-xs ss-text-muted">
-                      Score: <strong>{sample.score !== null && sample.score !== undefined ? sample.score.toFixed(4) : 'N/A'}</strong>
+                    <div className="ss-audio-player-mini">
+                      <audio
+                        controls
+                        preload="none"
+                        src={api.getAudioSampleUrl(sample.id)}
+                      />
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 600 }}>{sample.duration_sec.toFixed(1)}s</div>
+                      <div className="ss-text-xs ss-text-muted">
+                        {sample.sample_rate.toLocaleString()} Hz · {sample.channels === 1 ? 'Mono' : `${sample.channels} Ch`}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '12px' }}>
+                        <strong>Method:</strong> <span className="ss-mono ss-text-xs">{sample.verification_method || 'unverified'}</span>
+                      </div>
+                      {sample.evidence_notes ? (
+                        <div className="ss-text-xs ss-text-muted" style={{ fontStyle: 'italic', marginTop: '2px' }} title={sample.evidence_notes}>
+                          "{sample.evidence_notes.length > 55 ? `${sample.evidence_notes.slice(0, 55)}…` : sample.evidence_notes}"
+                        </div>
+                      ) : (
+                        <div className="ss-text-xs ss-text-muted">No evidence notes recorded</div>
+                      )}
+                      {sample.reviewer && (
+                        <div className="ss-text-xs" style={{ color: 'var(--accent-light)', marginTop: '2px' }}>
+                          By: {sample.reviewer}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '12px', fontWeight: 600 }}>{sample.prediction || 'N/A'}</div>
+                      <div className="ss-text-xs ss-text-muted">
+                        Score: <strong>{sample.score !== null && sample.score !== undefined ? sample.score.toFixed(4) : 'N/A'}</strong>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className={`ss-label-pill label-${sample.ground_truth_label}`}>
+                        {sample.ground_truth_label.replace(/_/g, ' ')}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      {sample.signal_analysis && (
+                        <button
+                          id={`btn-signal-sample-${sample.id}`}
+                          className="ss-btn ss-btn-ghost ss-btn-xs"
+                          onClick={() => setExpandedSampleAnalysis(prev => ({ ...prev, [sample.id]: !prev[sample.id] }))}
+                          title="View physical signal features"
+                        >
+                          <Activity size={12} />
+                          {expandedSampleAnalysis[sample.id] ? 'Hide' : 'Signal'}
+                        </button>
+                      )}
+                      <button
+                        id={`btn-annotate-${sample.id}`}
+                        className="ss-btn ss-btn-outline ss-btn-xs"
+                        onClick={() => handleOpenAnnotationModal(sample)}
+                        title="Annotate independent physical ground truth"
+                      >
+                        <Edit3 size={12} /> Annotate
+                      </button>
+                      <button
+                        className="ss-btn ss-btn-ghost ss-btn-xs"
+                        onClick={() => handleDeleteSample(sample.id)}
+                        title="Delete sample from storage & database"
+                        style={{ color: 'var(--red)' }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
                     </div>
                   </div>
 
-                  <div>
-                    <span className={`ss-label-pill label-${sample.ground_truth_label}`}>
-                      {sample.ground_truth_label.replace(/_/g, ' ')}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                    <button
-                      id={`btn-annotate-${sample.id}`}
-                      className="ss-btn ss-btn-outline ss-btn-xs"
-                      onClick={() => handleOpenAnnotationModal(sample)}
-                      title="Annotate independent physical ground truth"
-                    >
-                      <Edit3 size={12} /> Annotate
-                    </button>
-                    <button
-                      className="ss-btn ss-btn-ghost ss-btn-xs"
-                      onClick={() => handleDeleteSample(sample.id)}
-                      title="Delete sample from storage & database"
-                      style={{ color: 'var(--red)' }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
+                  {expandedSampleAnalysis[sample.id] && sample.signal_analysis && (
+                    <div style={{ padding: '8px 16px 14px 16px', background: 'rgba(255, 255, 255, 0.02)', borderBottom: '1px solid var(--border-subtle)' }}>
+                      <SignalAnalysisDisplay
+                        analysis={sample.signal_analysis}
+                        title={`Signal Characteristics: ${sample.filename}`}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

@@ -65,7 +65,17 @@ class AcousticInferenceResult(BaseModel):
     source_citation: Optional[str] = None
     source_url: Optional[str] = None
     transducer_type: Optional[str] = None
+    recording_domain: Literal[
+        "airborne_microphone",
+        "accelerometer",
+        "piezoelectric",
+        "pvdf",
+        "ultrasonic_transducer",
+        "synthetic_simulation",
+        "unknown"
+    ] = "unknown"
     simulation_params: Optional[dict] = None
+    signal_analysis: Optional[Dict[str, Any]] = None
 
 
 class ZeusInferenceResult(BaseModel):
