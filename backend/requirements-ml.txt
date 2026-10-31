@@ -1,0 +1,17 @@
+# Optional Machine Learning Dependencies for SealSense Model Adapters
+# ===================================================================
+
+# Nocturne Mini Bioacoustic Model (stratus-labs/nocturne-v1-mini)
+# To install CPU-only wheels on Linux/Mac/x86:
+# pip install -r requirements-ml.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchaudio>=2.0.0
+timm>=1.0.0
+safetensors>=0.4.0
+soundfile>=0.12.0
+huggingface_hub>=0.20.0
+
+# Zeus Time-Series Model (GestaltCog/zeus)
+# NOTE: Requires CUDA-enabled GPU and FlashAttention-2; not runnable on edge CPU nodes.
+# transformers>=4.38.0
+# flash_attn>=2.5.0
