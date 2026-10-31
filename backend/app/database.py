@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 import aiosqlite
 import os
 
-DB_PATH = os.environ.get("SEALSENSE_DB", "sealsense.db")
+DEFAULT_DB_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "sealsense.db")
+)
+DB_PATH = os.environ.get("SEALSENSE_DB", DEFAULT_DB_PATH)
 
 CREATE_READINGS = """
 CREATE TABLE IF NOT EXISTS environmental_readings (
@@ -19,7 +22,14 @@ CREATE TABLE IF NOT EXISTS environmental_readings (
     relative_humidity_pct REAL,
     co2_valid INTEGER NOT NULL DEFAULT 1,
     temp_valid INTEGER NOT NULL DEFAULT 1,
-    rh_valid INTEGER NOT NULL DEFAULT 1
+    rh_valid INTEGER NOT NULL DEFAULT 1,
+    audio_rms REAL,
+    audio_peak INTEGER,
+    audio_rms_dbfs REAL,
+    audio_peak_dbfs REAL,
+    audio_valid INTEGER NOT NULL DEFAULT 1,
+    transport TEXT NOT NULL DEFAULT 'wifi',
+    firmware_version TEXT
 )
 """
 
@@ -151,6 +161,13 @@ async def init_db():
             ("retained_audio_samples", "source_category", "TEXT"),
             ("retained_audio_samples", "recording_domain", "TEXT NOT NULL DEFAULT 'unknown'"),
             ("retained_audio_samples", "signal_analysis", "TEXT"),
+            ("environmental_readings", "audio_rms", "REAL"),
+            ("environmental_readings", "audio_peak", "INTEGER"),
+            ("environmental_readings", "audio_rms_dbfs", "REAL"),
+            ("environmental_readings", "audio_peak_dbfs", "REAL"),
+            ("environmental_readings", "audio_valid", "INTEGER NOT NULL DEFAULT 1"),
+            ("environmental_readings", "transport", "TEXT NOT NULL DEFAULT 'wifi'"),
+            ("environmental_readings", "firmware_version", "TEXT"),
         ]
         for table, col, col_def in migrations:
             try:
@@ -161,6 +178,8 @@ async def init_db():
 
         try:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_retained_audio_domain ON retained_audio_samples(recording_domain)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_readings_device_time ON environmental_readings(device_id, timestamp)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_readings_zone_time ON environmental_readings(zone_id, timestamp)")
         except Exception:
             pass
 

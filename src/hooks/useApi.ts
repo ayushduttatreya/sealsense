@@ -254,3 +254,73 @@ export function useSealSenseData(scenario: DemoScenario) {
   };
 }
 
+export type ObservabilityTimeRange = '5m' | '15m' | '1h' | '6h' | '24h' | 'all';
+
+export function useObservabilityData(
+  zoneId: string,
+  deviceId: string,
+  initialTimeRange: ObservabilityTimeRange = '15m'
+) {
+  const backendOnline = useBackendHealth();
+  const [timeRange, setTimeRange] = useState<ObservabilityTimeRange>(initialTimeRange);
+  const [refreshIntervalMs, setRefreshIntervalMs] = useState<number>(3000);
+  const [isLive, setIsLive] = useState<boolean>(true);
+  const [latest, setLatest] = useState<import('../types').LatestTelemetryResponse | null>(null);
+  const [history, setHistory] = useState<EnvironmentalReading[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [lastFetched, setLastFetched] = useState<Date>(new Date());
+
+  const fetchTelemetry = useCallback(async () => {
+    try {
+      const qParams = new URLSearchParams();
+      if (zoneId && zoneId !== 'all') qParams.set('zone_id', zoneId);
+      if (deviceId && deviceId !== 'all') qParams.set('device_id', deviceId);
+
+      const latestPath = `/api/telemetry/latest?${qParams.toString()}`;
+      qParams.set('time_range', timeRange);
+      qParams.set('limit', '300');
+      const historyPath = `/api/telemetry/history?${qParams.toString()}`;
+
+      const [latData, histData] = await Promise.all([
+        tryFetch<import('../types').LatestTelemetryResponse>(latestPath),
+        tryFetch<import('../types').TelemetryHistoryResponse>(historyPath),
+      ]);
+
+      if (latData) setLatest(latData);
+      if (histData && histData.readings) {
+        setHistory(histData.readings);
+      }
+      setLastFetched(new Date());
+    } finally {
+      setLoading(false);
+    }
+  }, [zoneId, deviceId, timeRange]);
+
+  useEffect(() => {
+    void fetchTelemetry();
+  }, [fetchTelemetry]);
+
+  useEffect(() => {
+    if (!isLive || refreshIntervalMs <= 0) return;
+    const interval = setInterval(() => {
+      void fetchTelemetry();
+    }, refreshIntervalMs);
+    return () => clearInterval(interval);
+  }, [isLive, refreshIntervalMs, fetchTelemetry]);
+
+  return {
+    latest,
+    history,
+    loading,
+    timeRange,
+    setTimeRange,
+    refreshIntervalMs,
+    setRefreshIntervalMs,
+    isLive,
+    setIsLive,
+    lastFetched,
+    fetchTelemetry,
+    backendOnline,
+  };
+}
+

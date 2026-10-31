@@ -126,8 +126,9 @@ export function DevicesSensors({ devices, zones }: Props) {
                     <div>
                       <div className="ss-sensor-type">{sensorLabel[s.type] ?? s.type}</div>
                       <div className="ss-sensor-meta">
-                        Operational Status: <strong>{s.status.toUpperCase()}</strong>
+                        Operational Status: <strong>{s.status === 'not_connected' ? 'NOT CONNECTED (Hardware Unpopulated)' : s.status.toUpperCase()}</strong>
                         {s.last_reading && ` · Last reading: ${new Date(s.last_reading).toLocaleTimeString()}`}
+                        {s.status === 'not_connected' && ' · Physical sensor unpopulated (Live telemetry disabled; no fabricated data)'}
                       </div>
                     </div>
                   </div>

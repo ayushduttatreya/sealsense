@@ -37,7 +37,7 @@ DEMO_DEVICES: List[Device] = [
         last_activity_time=(datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat(),
         is_active=True,
         sensors=[
-            SensorInventory(type="SCD41", status="ok"),
+            SensorInventory(type="SCD41", status="not_connected"),
             SensorInventory(type="INMP441", status="ok"),
             SensorInventory(type="BUZZER", status="ok"),
         ],
@@ -51,7 +51,7 @@ DEMO_DEVICES: List[Device] = [
         last_activity_time=(datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat(),
         is_active=False,
         sensors=[
-            SensorInventory(type="SCD41", status="unknown"),
+            SensorInventory(type="SCD41", status="not_connected"),
             SensorInventory(type="INMP441", status="unknown"),
             SensorInventory(type="BUZZER", status="unknown"),
         ],

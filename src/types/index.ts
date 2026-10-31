@@ -17,7 +17,7 @@ export interface Device {
 
 export interface SensorInventory {
   type: 'SCD41' | 'INMP441' | 'BUZZER';
-  status: 'ok' | 'error' | 'unknown';
+  status: 'ok' | 'error' | 'unknown' | 'not_connected' | 'unavailable';
   last_reading?: string;
 }
 
@@ -42,6 +42,32 @@ export interface EnvironmentalReading {
   co2_valid: boolean;
   temp_valid: boolean;
   rh_valid: boolean;
+  audio_rms?: number | null;
+  audio_peak?: number | null;
+  audio_rms_dbfs?: number | null;
+  audio_peak_dbfs?: number | null;
+  audio_valid?: boolean;
+  transport?: 'usb_serial' | 'wifi' | string;
+  firmware_version?: string;
+}
+
+export interface LatestTelemetryResponse {
+  reading: EnvironmentalReading | null;
+  is_hardware: boolean;
+  source: DataSource;
+  transport: string | null;
+  age_seconds: number | null;
+  device_status: 'online' | 'stale' | 'offline';
+}
+
+export interface TelemetryHistoryResponse {
+  readings: EnvironmentalReading[];
+  count: number;
+  device_id: string | null;
+  zone_id: string | null;
+  time_range: string;
+  source: DataSource;
+  is_hardware: boolean;
 }
 
 // ─── Acoustic Events ──────────────────────────────────────────────────────────

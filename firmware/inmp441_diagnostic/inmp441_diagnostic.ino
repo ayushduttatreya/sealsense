@@ -54,10 +54,30 @@ double   prevRms24 = 0.0;
 float    prevRmsDbfs = -96.0f;
 int32_t  prevPeak24 = 0;
 
+// ─── WAV Header Struct (44 Bytes, Packed) ────────────────────────
+#pragma pack(push, 1)
+struct WavHeader {
+  char     riff_tag[4];        // "RIFF"
+  uint32_t riff_length;        // File size - 8
+  char     wave_tag[4];        // "WAVE"
+  char     fmt_tag[4];         // "fmt "
+  uint32_t fmt_length;         // 16 for PCM
+  uint16_t audio_format;       // 1 for PCM
+  uint16_t num_channels;       // 1 (Mono)
+  uint32_t sample_rate;        // 16000
+  uint32_t byte_rate;          // sample_rate * num_channels * (bits/8) = 32000
+  uint16_t block_align;        // num_channels * (bits/8) = 2
+  uint16_t bits_per_sample;    // 16
+  char     data_tag[4];        // "data"
+  uint32_t data_length;        // Number of audio data bytes
+};
+#pragma pack(pop)
+
 // ─── Forward Declarations ─────────────────────────────────────────
 bool initI2S();
 void runAcousticWindow();
 void printAsciiBar(float dbfs);
+void streamWavBinary(int durationSec);
 
 // ─────────────────────────────────────────────────────────────────
 void setup() {
@@ -74,6 +94,7 @@ void setup() {
   Serial.printf("Window Size:      16,000 frames (1.000 second cadence)\n");
   Serial.printf("Active Channel:   Slot 0 (Confirmed microphone transmission)\n");
   Serial.printf("Reference Channel:Slot 1 (Idle / floating LSBs)\n");
+  Serial.println("Commands:         Send 'CAPTURE_WAV:10' or 'REC' to stream WAV");
   Serial.println("--------------------------------------------------------");
   Serial.println("Test Protocol:");
   Serial.println("  1. Quiet Room:   Observe baseline RMS and stable trend (≈).");
@@ -91,6 +112,20 @@ void setup() {
 
 // ─────────────────────────────────────────────────────────────────
 void loop() {
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    if (cmd.startsWith("CAPTURE_WAV") || cmd == "REC" || cmd == "w" || cmd == "r") {
+      int durationSec = 10;
+      int colonIdx = cmd.indexOf(':');
+      if (colonIdx > 0) {
+        int parsed = cmd.substring(colonIdx + 1).toInt();
+        if (parsed >= 1 && parsed <= 30) durationSec = parsed;
+      }
+      streamWavBinary(durationSec);
+      return;
+    }
+  }
   runAcousticWindow();
 }
 
@@ -322,3 +357,60 @@ void printAsciiBar(float dbfs) {
   }
   Serial.print("]");
 }
+
+// ─── Binary WAV Streaming (Memory-Safe Bounded Chunks) ────────────
+void streamWavBinary(int durationSec) {
+  uint32_t totalSamples = SAMPLE_RATE * durationSec;
+  uint32_t dataBytes = totalSamples * sizeof(int16_t);
+  uint32_t totalWavBytes = sizeof(WavHeader) + dataBytes;
+
+  WavHeader header;
+  memcpy(header.riff_tag, "RIFF", 4);
+  header.riff_length = 36 + dataBytes;
+  memcpy(header.wave_tag, "WAVE", 4);
+  memcpy(header.fmt_tag, "fmt ", 4);
+  header.fmt_length = 16;
+  header.audio_format = 1;        // PCM
+  header.num_channels = 1;        // Mono
+  header.sample_rate = SAMPLE_RATE;
+  header.byte_rate = SAMPLE_RATE * 1 * sizeof(int16_t);  // 32000
+  header.block_align = 1 * sizeof(int16_t);              // 2
+  header.bits_per_sample = 16;
+  memcpy(header.data_tag, "data", 4);
+  header.data_length = dataBytes;
+
+  Serial.println();
+  Serial.printf(">>>BEGIN_WAV:%u<<<\n", totalWavBytes);
+  Serial.flush();
+
+  // Send 44-byte binary WAV header
+  Serial.write((const uint8_t*)&header, sizeof(WavHeader));
+
+  uint32_t samplesSent = 0;
+  int16_t pcmChunk[CHUNK_FRAMES];
+
+  while (samplesSent < totalSamples) {
+    size_t toRead = CHUNK_FRAMES;
+    if (samplesSent + toRead > totalSamples) {
+      toRead = totalSamples - samplesSent;
+    }
+    size_t bytesToRead = toRead * 2 * sizeof(int32_t);
+    size_t bytesRead = 0;
+    esp_err_t res = i2s_read(I2S_NUM_0, chunkBuffer, bytesToRead, &bytesRead, portMAX_DELAY);
+    if (res == ESP_OK && bytesRead > 0) {
+      size_t framesRead = bytesRead / (2 * sizeof(int32_t));
+      for (size_t i = 0; i < framesRead; i++) {
+        // Slot 0 (even index) is the active microphone channel: w0 >> 16 extracts top 16 bits
+        pcmChunk[i] = (int16_t)(chunkBuffer[2 * i] >> 16);
+      }
+      Serial.write((const uint8_t*)pcmChunk, framesRead * sizeof(int16_t));
+      samplesSent += framesRead;
+    }
+  }
+
+  Serial.flush();
+  Serial.println();
+  Serial.printf(">>>END_WAV:%u<<<\n", totalWavBytes);
+  Serial.flush();
+}
+

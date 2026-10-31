@@ -13,7 +13,7 @@ ValidationStatus = Literal["unvalidated", "validated", "rejected"]
 AlertSeverity = Literal["info", "warning", "critical"]
 AlertCategory = Literal["environmental", "acoustic", "combined", "system"]
 ZoneHealth = Literal["healthy", "warning", "critical", "unknown"]
-SensorStatus = Literal["ok", "error", "unknown"]
+SensorStatus = Literal["ok", "error", "unknown", "not_connected", "unavailable"]
 ConfidenceBand = Literal["low", "medium", "high", "uncertain"]
 
 AlarmState = Literal["active_unack", "active_ack", "cleared_unack", "cleared_ack"]
@@ -69,6 +69,13 @@ class EnvironmentalReading(BaseModel):
     co2_valid: bool = True
     temp_valid: bool = True
     rh_valid: bool = True
+    audio_rms: Optional[float] = None
+    audio_peak: Optional[int] = None
+    audio_rms_dbfs: Optional[float] = None
+    audio_peak_dbfs: Optional[float] = None
+    audio_valid: bool = True
+    transport: Optional[str] = "wifi"
+    firmware_version: Optional[str] = None
 
     @field_validator("co2_ppm")
     @classmethod
@@ -93,7 +100,7 @@ class EnvironmentalReading(BaseModel):
 
 
 class TelemetryPayload(BaseModel):
-    """POST /api/telemetry — firmware sends this."""
+    """POST /api/telemetry — firmware or serial bridge sends this."""
     device_id: str
     zone_id: str
     timestamp: str
@@ -103,6 +110,33 @@ class TelemetryPayload(BaseModel):
     co2_valid: bool = True
     temp_valid: bool = True
     rh_valid: bool = True
+    audio_rms: Optional[float] = None
+    audio_peak: Optional[int] = None
+    audio_rms_dbfs: Optional[float] = None
+    audio_peak_dbfs: Optional[float] = None
+    audio_valid: bool = True
+    transport: Optional[str] = "usb_serial"
+    firmware_version: Optional[str] = None
+    source: Optional[DataSource] = "REAL"
+
+
+class LatestTelemetryResponse(BaseModel):
+    reading: Optional[EnvironmentalReading] = None
+    is_hardware: bool = False
+    source: DataSource = "SIMULATED"
+    transport: Optional[str] = None
+    age_seconds: Optional[float] = None
+    device_status: str = "offline"  # "online" | "stale" | "offline"
+
+
+class TelemetryHistoryResponse(BaseModel):
+    readings: list[EnvironmentalReading]
+    count: int
+    device_id: Optional[str] = None
+    zone_id: Optional[str] = None
+    time_range: str
+    source: DataSource
+    is_hardware: bool
 
 
 # ─── Acoustic Event ────────────────────────────────────────────────

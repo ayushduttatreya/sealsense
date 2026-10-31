@@ -47,7 +47,7 @@ function App() {
           </div>
         ) : (
           <Routes>
-            <Route path="/" element={<Overview readings={readings} alerts={alerts} zones={zones} onReload={reload} />} />
+            <Route path="/" element={<Overview readings={readings} alerts={alerts} zones={zones} devices={devices} onReload={reload} />} />
             <Route path="/zones" element={<StorageZones zones={zones} devices={devices} readings={readings} alerts={alerts} />} />
             <Route path="/acoustic" element={<AcousticMonitoring events={events} onValidate={validateAcousticEvent} onBatchReview={batchReviewEvents} />} />
             <Route path="/alerts" element={<AlertsEvents alerts={alerts} onAcknowledge={acknowledgeAlert} onClear={clearAlert} onGetTrace={getAlertTrace} />} />

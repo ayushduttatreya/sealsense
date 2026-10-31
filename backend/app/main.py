@@ -26,7 +26,7 @@ from .models import (
     AggregatedBucket, AggregatedTelemetryResponse,
     RetainedAudioSample, AnnotationUpdateRequest, DatasetEvaluationReport,
     GroundTruthLabel, ReferenceAudioCatalogItem, ReferenceImportRequest,
-    SyntheticImpulseRequest,
+    SyntheticImpulseRequest, LatestTelemetryResponse, TelemetryHistoryResponse,
 )
 from .audio_storage import (
     compute_sha256, validate_wav_bytes, generate_sample_id,
@@ -300,33 +300,67 @@ async def list_alerts(
     return result_alerts[:limit_val]
 
 
-# ─── Telemetry Ingest ─────────────────────────────────────────────
+# ─── Telemetry Ingest & Observability ─────────────────────────────
 @app.post("/api/telemetry", response_model=EnvironmentalReading)
 async def ingest_telemetry(payload: TelemetryPayload):
-    """Receives real telemetry from ESP32 firmware via HTTP POST and applies ThingsBoard-style deduplicating alert rules."""
+    """Receives real telemetry from ESP32 firmware via HTTP POST or USB Serial Bridge."""
     reading = EnvironmentalReading(
         zone_id=payload.zone_id,
         device_id=payload.device_id,
-        timestamp=payload.timestamp,
-        source="REAL",
+        timestamp=payload.timestamp or datetime.now(timezone.utc).isoformat(),
+        source=payload.source or "REAL",
         co2_ppm=payload.co2_ppm,
         temperature_c=payload.temperature_c,
         relative_humidity_pct=payload.relative_humidity_pct,
         co2_valid=payload.co2_valid,
         temp_valid=payload.temp_valid,
         rh_valid=payload.rh_valid,
+        audio_rms=payload.audio_rms,
+        audio_peak=payload.audio_peak,
+        audio_rms_dbfs=payload.audio_rms_dbfs,
+        audio_peak_dbfs=payload.audio_peak_dbfs,
+        audio_valid=payload.audio_valid,
+        transport=payload.transport or "usb_serial",
+        firmware_version=payload.firmware_version,
     )
     async with get_db() as db:
         await db.execute(
             """INSERT INTO environmental_readings
                (id, timestamp, zone_id, device_id, source, co2_ppm,
-                temperature_c, relative_humidity_pct, co2_valid, temp_valid, rh_valid)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (reading.id, reading.timestamp, reading.zone_id, reading.device_id,
-             reading.source, reading.co2_ppm, reading.temperature_c,
-             reading.relative_humidity_pct,
-             int(reading.co2_valid), int(reading.temp_valid), int(reading.rh_valid)),
+                temperature_c, relative_humidity_pct, co2_valid, temp_valid, rh_valid,
+                audio_rms, audio_peak, audio_rms_dbfs, audio_peak_dbfs, audio_valid,
+                transport, firmware_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                reading.id, reading.timestamp, reading.zone_id, reading.device_id,
+                reading.source, reading.co2_ppm, reading.temperature_c,
+                reading.relative_humidity_pct,
+                int(reading.co2_valid), int(reading.temp_valid), int(reading.rh_valid),
+                reading.audio_rms, reading.audio_peak, reading.audio_rms_dbfs,
+                reading.audio_peak_dbfs, int(reading.audio_valid),
+                reading.transport, reading.firmware_version,
+            ),
         )
+
+        # Update in-memory device registry so the dashboard immediately sees online hardware
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for d in DEMO_DEVICES:
+            if d.id == payload.device_id:
+                d.last_seen = now_iso
+                d.last_activity_time = now_iso
+                d.connected = True
+                d.is_active = True
+                if payload.firmware_version:
+                    d.firmware_version = payload.firmware_version
+                for s in d.sensors:
+                    if s.type == "SCD41":
+                        s.status = "ok" if payload.co2_valid and payload.co2_ppm is not None else "error"
+                        s.last_reading = now_iso
+                    elif s.type == "INMP441":
+                        s.status = "ok" if payload.audio_valid else "unavailable"
+                        s.last_reading = now_iso
+                    elif s.type == "BUZZER":
+                        s.status = "ok"
 
         # Retrieve recent readings for rule evaluation
         async with db.execute(
@@ -346,7 +380,6 @@ async def ingest_telemetry(payload: TelemetryPayload):
                 existing = await cur.fetchone()
 
             if existing:
-                # Update existing active alert
                 await db.execute(
                     "UPDATE alerts SET timestamp = ?, message = ?, triggered_by = ? WHERE id = ?",
                     (alrt.timestamp, alrt.message, json.dumps(alrt.triggered_by), existing["id"])
@@ -363,8 +396,195 @@ async def ingest_telemetry(payload: TelemetryPayload):
 
         await db.commit()
 
-    log.info(f"Telemetry received from {payload.device_id}: CO2={payload.co2_ppm} RH={payload.relative_humidity_pct}")
+    log.info(f"Telemetry ingested from {payload.device_id} ({reading.transport}): CO2={payload.co2_ppm} ppm, Temp={payload.temperature_c}°C, Air_RH={payload.relative_humidity_pct}%, RMS={payload.audio_rms_dbfs} dBFS")
     return reading
+
+
+@app.get("/api/telemetry/latest", response_model=LatestTelemetryResponse)
+async def get_latest_telemetry(
+    device_id: Optional[str] = None,
+    zone_id: Optional[str] = None,
+):
+    """Returns the most recent telemetry packet from real hardware or simulated demo."""
+    query = "SELECT * FROM environmental_readings"
+    params = []
+    conds = []
+    if device_id:
+        conds.append("device_id = ?")
+        params.append(device_id)
+    if zone_id:
+        conds.append("zone_id = ?")
+        params.append(zone_id)
+    if conds:
+        query += " WHERE " + " AND ".join(conds)
+    query += " ORDER BY timestamp DESC LIMIT 1"
+
+    async with get_db() as db:
+        async with db.execute(query, params) as cur:
+            row = await cur.fetchone()
+
+    now = datetime.now(timezone.utc)
+    if row:
+        reading = EnvironmentalReading(**dict(row))
+        try:
+            ts = datetime.fromisoformat(reading.timestamp.replace("Z", "+00:00"))
+            age = (now - ts).total_seconds()
+        except Exception:
+            age = 0.0
+
+        status_str = "online" if age < 15 else ("stale" if age < 60 else "offline")
+        return LatestTelemetryResponse(
+            reading=reading,
+            is_hardware=reading.source == "REAL",
+            source=reading.source,
+            transport=reading.transport,
+            age_seconds=round(age, 1),
+            device_status=status_str,
+        )
+
+    # Fallback to latest demo reading
+    demo_readings, _, _, _ = get_demo_data(_current_scenario)
+    if zone_id:
+        demo_readings = [r for r in demo_readings if r.zone_id == zone_id]
+    if demo_readings:
+        latest_demo = demo_readings[-1]
+        return LatestTelemetryResponse(
+            reading=latest_demo,
+            is_hardware=False,
+            source="SIMULATED",
+            transport="demo_generator",
+            age_seconds=5.0,
+            device_status="online",
+        )
+
+    return LatestTelemetryResponse(
+        reading=None,
+        is_hardware=False,
+        source="SIMULATED",
+        transport=None,
+        age_seconds=None,
+        device_status="offline",
+    )
+
+
+@app.get("/api/telemetry/history", response_model=TelemetryHistoryResponse)
+async def get_telemetry_history(
+    device_id: Optional[str] = None,
+    zone_id: Optional[str] = None,
+    time_range: str = Query("15m", description="Time range: 5m, 15m, 1h, 6h, 24h, all"),
+    limit: int = Query(300, description="Max readings to return"),
+):
+    """
+    Returns time-filtered, chronological telemetry readings for high-density Grafana time-series graphs.
+    """
+    now = datetime.now(timezone.utc)
+    delta_map = {
+        "5m": timedelta(minutes=5),
+        "15m": timedelta(minutes=15),
+        "1h": timedelta(hours=1),
+        "6h": timedelta(hours=6),
+        "24h": timedelta(hours=24),
+    }
+
+    start_iso = None
+    if time_range in delta_map:
+        start_iso = (now - delta_map[time_range]).isoformat()
+
+    query = "SELECT * FROM environmental_readings"
+    params = []
+    conds = []
+
+    if start_iso:
+        conds.append("timestamp >= ?")
+        params.append(start_iso)
+    if device_id:
+        conds.append("device_id = ?")
+        params.append(device_id)
+    if zone_id:
+        conds.append("zone_id = ?")
+        params.append(zone_id)
+
+    if conds:
+        query += " WHERE " + " AND ".join(conds)
+
+    query += " ORDER BY timestamp ASC LIMIT ?"
+    params.append(limit)
+
+    async with get_db() as db:
+        async with db.execute(query, params) as cur:
+            rows = await cur.fetchall()
+
+    if rows and len(rows) > 0:
+        readings = [EnvironmentalReading(**dict(r)) for r in rows]
+        is_hw = any(r.source == "REAL" for r in readings)
+        return TelemetryHistoryResponse(
+            readings=readings,
+            count=len(readings),
+            device_id=device_id,
+            zone_id=zone_id,
+            time_range=time_range,
+            source="REAL" if is_hw else "SIMULATED",
+            is_hardware=is_hw,
+        )
+
+    # Fall back smoothly to demo readings for that time window
+    demo_readings, _, _, _ = get_demo_data(_current_scenario)
+    if zone_id:
+        demo_readings = [r for r in demo_readings if r.zone_id == zone_id]
+    if start_iso:
+        demo_readings = [r for r in demo_readings if r.timestamp >= start_iso]
+
+    # If demo readings are too sparse for 5m/15m, generate an interpolated dense series
+    if len(demo_readings) < 5 and time_range in ("5m", "15m"):
+        base_reading = demo_readings[-1] if demo_readings else None
+        base_co2 = base_reading.co2_ppm if base_reading and base_reading.co2_ppm else 1826.0
+        base_temp = base_reading.temperature_c if base_reading and base_reading.temperature_c else 25.4
+        base_rh = base_reading.relative_humidity_pct if base_reading and base_reading.relative_humidity_pct else 68.1
+        
+        step_sec = 10 if time_range == "5m" else 30
+        points = 30
+        sim_readings = []
+        for i in range(points):
+            t = now - timedelta(seconds=(points - 1 - i) * step_sec)
+            sim_readings.append(EnvironmentalReading(
+                id=f"sim-hist-{i}",
+                timestamp=t.isoformat(),
+                zone_id=zone_id or "zone-a",
+                device_id=device_id or "esp32-zone-a-01",
+                source="SIMULATED",
+                co2_ppm=round(base_co2 + (i % 5 - 2) * 3.5, 1),
+                temperature_c=round(base_temp + (i % 3 - 1) * 0.1, 1),
+                relative_humidity_pct=round(base_rh + (i % 4 - 2) * 0.15, 1),
+                co2_valid=True,
+                temp_valid=True,
+                rh_valid=True,
+                audio_rms=142000,
+                audio_peak=265000,
+                audio_rms_dbfs=round(-35.4 + (i % 4 - 2) * 0.8, 1),
+                audio_peak_dbfs=round(-30.0 + (i % 3 - 1) * 1.2, 1),
+                audio_valid=True,
+                transport="demo_generator",
+                firmware_version="2.0.0-PROTOTYPE",
+            ))
+        return TelemetryHistoryResponse(
+            readings=sim_readings,
+            count=len(sim_readings),
+            device_id=device_id,
+            zone_id=zone_id,
+            time_range=time_range,
+            source="SIMULATED",
+            is_hardware=False,
+        )
+
+    return TelemetryHistoryResponse(
+        readings=demo_readings,
+        count=len(demo_readings),
+        device_id=device_id,
+        zone_id=zone_id,
+        time_range=time_range,
+        source="SIMULATED",
+        is_hardware=False,
+    )
 
 
 # ─── Alert Acknowledge ────────────────────────────────────────────
@@ -1132,6 +1352,7 @@ async def get_audio_sample_file(sample_id: str):
         path,
         media_type="audio/wav",
         filename=download_name,
+        content_disposition_type="inline",
         headers={"Accept-Ranges": "bytes"}
     )
 
@@ -1297,6 +1518,7 @@ async def get_reference_audio_file(catalog_id: str):
         file_path,
         media_type="audio/wav",
         filename=item["filename"],
+        content_disposition_type="inline",
         headers={"Accept-Ranges": "bytes"}
     )
 
