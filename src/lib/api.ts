@@ -75,12 +75,17 @@ export const api = {
     zoneId = 'zone-a',
     deviceId = 'esp32-zone-a-01',
     saveEvent = false,
+    retainSample = false,
+    isSynthetic = false,
   ) => {
     const formData = new FormData();
     formData.append('file', file, filename);
     formData.append('zone_id', zoneId);
     formData.append('device_id', deviceId);
     formData.append('save_event', String(saveEvent));
+    formData.append('retain_sample', String(retainSample));
+    formData.append('is_synthetic', String(isSynthetic));
+    formData.append('input_source', isSynthetic ? 'synthetic' : 'user_upload');
     const res = await fetch(`${BASE}/api/inference/acoustic/upload`, {
       method: 'POST',
       body: formData,
@@ -91,5 +96,78 @@ export const api = {
     }
     return res.json() as Promise<import('../types').AcousticInferenceResult>;
   },
+  audioSamples: (filters?: {
+    zone_id?: string;
+    ground_truth_label?: string;
+    review_status?: string;
+    is_synthetic?: boolean;
+    limit?: number;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.zone_id) params.set('zone_id', filters.zone_id);
+    if (filters?.ground_truth_label) params.set('ground_truth_label', filters.ground_truth_label);
+    if (filters?.review_status) params.set('review_status', filters.review_status);
+    if (filters?.is_synthetic !== undefined) params.set('is_synthetic', String(filters.is_synthetic));
+    if (filters?.limit) params.set('limit', String(filters.limit));
+    return request<import('../types').RetainedAudioSample[]>(`/api/audio-samples?${params}`);
+  },
+  audioSample: (id: string) =>
+    request<import('../types').RetainedAudioSample>(`/api/audio-samples/${id}`),
+  getAudioSampleUrl: (id: string) => `${BASE}/api/audio-samples/${id}/audio`,
+  updateSampleAnnotation: (
+    id: string,
+    payload: {
+      ground_truth_label: import('../types').GroundTruthLabel;
+      verification_method?: import('../types').VerificationMethod;
+      reviewer?: string;
+      evidence_notes?: string;
+      review_status?: 'UNREVIEWED' | 'REVIEWED';
+    }
+  ) =>
+    request<import('../types').RetainedAudioSample>(`/api/audio-samples/${id}/annotation`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteAudioSample: (id: string) =>
+    request<{ deleted: boolean; sample_id: string }>(`/api/audio-samples/${id}`, {
+      method: 'DELETE',
+    }),
+  datasetManifestUrl: (format: 'json' | 'csv' = 'json', include_synthetic = false) =>
+    `${BASE}/api/dataset/manifest?format=${format}&include_synthetic=${include_synthetic}`,
+  datasetEvaluation: (threshold = 0.05) =>
+    request<import('../types').DatasetEvaluationReport>(`/api/dataset/evaluation?threshold=${threshold}`),
+  seedDemoAudioSamples: () =>
+    request<{ seeded: number; message: string }>('/api/audio-samples/seed-demo', {
+      method: 'POST',
+    }),
+  referenceCatalog: () =>
+    request<import('../types').ReferenceAudioCatalogItem[]>('/api/reference/catalog'),
+  referenceAudioUrl: (catalogId: string) => `${BASE}/api/reference/${catalogId}/audio`,
+  importReference: (payload: import('../types').ReferenceImportRequest) =>
+    request<import('../types').AcousticInferenceResult>('/api/reference/import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  generateSyntheticImpulse: (payload: import('../types').SyntheticImpulseRequest) =>
+    request<import('../types').AcousticInferenceResult>('/api/simulation/synthetic/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  syntheticWavUrl: (params?: {
+    impulse_rate?: number;
+    amplitude?: number;
+    noise_level?: number;
+    duration_sec?: number;
+    seed?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.impulse_rate !== undefined) q.set('impulse_rate', String(params.impulse_rate));
+    if (params?.amplitude !== undefined) q.set('amplitude', String(params.amplitude));
+    if (params?.noise_level !== undefined) q.set('noise_level', String(params.noise_level));
+    if (params?.duration_sec !== undefined) q.set('duration_sec', String(params.duration_sec));
+    if (params?.seed !== undefined) q.set('seed', String(params.seed));
+    return `${BASE}/api/simulation/synthetic/wav?${q.toString()}`;
+  },
 };
+
 

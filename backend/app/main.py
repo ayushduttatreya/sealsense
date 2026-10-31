@@ -3,22 +3,41 @@ SealSense FastAPI Backend
 Run with: uvicorn app.main:app --reload --port 8000
 """
 from __future__ import annotations
+import csv
+import io
 import json
 import logging
+import os
+import wave
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, List, Literal
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, status
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form, status, Response
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .database import init_db, get_db
+from .database import init_db, get_db, CREATE_SAMPLES
 from .models import (
     EnvironmentalReading, AcousticEvent, Alert, Device, Zone,
     TelemetryPayload, AcknowledgeRequest, ClearAlertRequest,
     ValidateEventRequest, ScenarioRequest,
     TraceStep, ExecutionTrace, BatchReviewRequest,
     AggregatedBucket, AggregatedTelemetryResponse,
+    RetainedAudioSample, AnnotationUpdateRequest, DatasetEvaluationReport,
+    GroundTruthLabel, ReferenceAudioCatalogItem, ReferenceImportRequest,
+    SyntheticImpulseRequest,
+)
+from .audio_storage import (
+    compute_sha256, validate_wav_bytes, generate_sample_id,
+    save_audio_file, get_audio_file_path, delete_audio_file
+)
+from .evaluation import evaluate_dataset_samples
+from .reference_dataset import (
+    list_reference_catalog, get_catalog_item, get_reference_file_path
+)
+from .synthetic_generator import (
+    generate_synthetic_impulse_wav, generate_synthetic_chirp_wav
 )
 from .demo_data import get_demo_data, DEMO_DEVICES, BASE_ZONES
 from .alert_rules import evaluate_environmental
@@ -127,6 +146,29 @@ async def list_readings(
     return readings[:limit_val]
 
 
+def _row_to_acoustic_event(r) -> AcousticEvent:
+    d = dict(r)
+    if d.get("waveform_preview"):
+        if isinstance(d["waveform_preview"], str):
+            try:
+                d["waveform_preview"] = json.loads(d["waveform_preview"])
+            except Exception:
+                pass
+    if not d.get("waveform_preview"):
+        d["waveform_preview"] = [0.08, 0.12, 0.35, 0.65, 0.78, 0.45, 0.22, 0.15, 0.48, 0.82, 0.61, 0.28, 0.18, 0.32, 0.14, 0.09]
+
+    if d.get("spectrogram_peaks"):
+        if isinstance(d["spectrogram_peaks"], str):
+            try:
+                d["spectrogram_peaks"] = json.loads(d["spectrogram_peaks"])
+            except Exception:
+                pass
+    if not d.get("spectrogram_peaks"):
+        d["spectrogram_peaks"] = [{"freq_hz": 4200.0, "db": -24.5}, {"freq_hz": 6800.0, "db": -31.2}]
+
+    return AcousticEvent(**d)
+
+
 # ─── Acoustic Events ──────────────────────────────────────────────
 @app.get("/api/events", response_model=list[AcousticEvent])
 async def list_events(
@@ -139,6 +181,23 @@ async def list_events(
     zone_id_val = zone_id if isinstance(zone_id, str) else None
     review_status_val = review_status if isinstance(review_status, str) else None
     event_tier_val = event_tier if isinstance(event_tier, str) else None
+
+    if _current_scenario != "healthy_storage":
+        _, events, _, _ = get_demo_data(_current_scenario)
+        result_events = []
+        for e in events:
+            if e.id in _demo_event_overrides:
+                d = e.model_dump()
+                d.update(_demo_event_overrides[e.id])
+                e = AcousticEvent(**d)
+            if zone_id_val and e.zone_id != zone_id_val:
+                continue
+            if review_status_val and e.review_status != review_status_val:
+                continue
+            if event_tier_val and e.event_tier != event_tier_val:
+                continue
+            result_events.append(e)
+        return result_events[:limit_val]
 
     async with get_db() as db:
         query = "SELECT * FROM acoustic_events"
@@ -161,29 +220,7 @@ async def list_events(
             rows = await cur.fetchall()
 
     if rows:
-        events = []
-        for r in rows:
-            d = dict(r)
-            if d.get("waveform_preview"):
-                if isinstance(d["waveform_preview"], str):
-                    try:
-                        d["waveform_preview"] = json.loads(d["waveform_preview"])
-                    except Exception:
-                        pass
-            if not d.get("waveform_preview"):
-                d["waveform_preview"] = [0.08, 0.12, 0.35, 0.65, 0.78, 0.45, 0.22, 0.15, 0.48, 0.82, 0.61, 0.28, 0.18, 0.32, 0.14, 0.09]
-
-            if d.get("spectrogram_peaks"):
-                if isinstance(d["spectrogram_peaks"], str):
-                    try:
-                        d["spectrogram_peaks"] = json.loads(d["spectrogram_peaks"])
-                    except Exception:
-                        pass
-            if not d.get("spectrogram_peaks"):
-                d["spectrogram_peaks"] = [{"freq_hz": 4200.0, "db": -24.5}, {"freq_hz": 6800.0, "db": -31.2}]
-
-            events.append(AcousticEvent(**d))
-        return events
+        return [_row_to_acoustic_event(r) for r in rows]
 
     _, events, _, _ = get_demo_data(_current_scenario)
     result_events = []
@@ -432,7 +469,7 @@ async def validate_event(event_id: str, req: ValidateEventRequest):
             await db.commit()
             async with db.execute("SELECT * FROM acoustic_events WHERE id=?", (event_id,)) as cur:
                 row = await cur.fetchone()
-            return AcousticEvent(**dict(row))
+            return _row_to_acoustic_event(row)
 
     # Demo event (not in DB) — return validated copy
     _, events, _, _ = get_demo_data(_current_scenario)
@@ -734,12 +771,25 @@ async def run_acoustic_inference(req: AcousticInferenceRequest):
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB max WAV upload
 
 
+def _is_truthy(val) -> bool:
+    if isinstance(val, bool):
+        return val
+    if hasattr(val, "default"):
+        return bool(val.default)
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes")
+    return bool(val)
+
+
 @app.post("/api/inference/acoustic/upload", response_model=AcousticInferenceResult)
 async def upload_acoustic_recording(
     file: UploadFile = File(..., description="WAV audio recording file"),
     zone_id: Optional[str] = Form("zone-a"),
     device_id: Optional[str] = Form("esp32-zone-a-01"),
     save_event: bool = Form(False, description="Persist inference result as an acoustic event in the review queue"),
+    retain_sample: bool = Form(False, description="Persist original WAV recording to audio sample storage for dataset collection"),
+    is_synthetic: bool = Form(False, description="Explicit flag indicating whether the sample is a synthetic test signal"),
+    input_source: Optional[str] = Form("user_upload", description="Origin of audio: user_upload, hardware_recording, or synthetic"),
 ):
     """
     Ingests, validates, resamples, and executes Nocturne Mini bioacoustic inference
@@ -754,7 +804,13 @@ async def upload_acoustic_recording(
     - Resamples to 16 kHz
     - Standardizes to a 10.0s window (pads with silence if short, truncates if long)
     - Returns rich metadata (original duration, sample rate, channels, waveform preview, top 5 predictions)
+    - Optionally retains original recording on disk outside SQLite when retain_sample=True
     """
+    should_retain = _is_truthy(retain_sample)
+    should_save_event = _is_truthy(save_event)
+    synthetic_flag = _is_truthy(is_synthetic)
+    source_val = input_source.default if hasattr(input_source, "default") else input_source
+
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -785,11 +841,21 @@ async def upload_acoustic_recording(
             )
         )
 
+    try:
+        channels, sample_rate, duration_sec = validate_wav_bytes(contents)
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid audio structure: {val_err}"
+        )
+
+    source_type = "synthetic" if synthetic_flag or source_val == "synthetic" else (source_val or "user_upload")
+
     adapter = NocturneMiniAdapter()
     result = adapter.predict_wav_bytes(
         contents,
         filename=file.filename,
-        input_source="user_upload",
+        input_source=source_type,
         top_k=5,
     )
 
@@ -799,8 +865,89 @@ async def upload_acoustic_recording(
             detail=result.error or "Audio processing error"
         )
 
+    sample_id: Optional[str] = None
+
+    # Persistent Audio Sample Storage for Dataset Collection
+    if should_retain:
+        sha256_hash = compute_sha256(contents)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        
+        async with get_db() as db:
+            await db.executescript(CREATE_SAMPLES)
+            # Check for existing sample with identical hash
+            cursor = await db.execute("SELECT id, stored_filename FROM retained_audio_samples WHERE sha256_hash = ?", (sha256_hash,))
+
+            existing = await cursor.fetchone()
+
+            if existing:
+                sample_id = existing["id"]
+                log.info("Audio upload matches existing sample hash %s -> reusing ID %s", sha256_hash, sample_id)
+            else:
+                sample_id = generate_sample_id()
+                try:
+                    stored_fn, stored_path, file_size = save_audio_file(sample_id, contents)
+                    wf_json = json.dumps(result.waveform_preview or [])
+                    peaks_clean = [
+                        {"freq_hz": p.get("frequency_hz", p.get("freq_hz", 0)), "db": p.get("magnitude_db", p.get("db", 0))}
+                        for p in (result.spectrogram_peaks or [])
+                    ]
+                    peaks_json = json.dumps(peaks_clean)
+                    top_preds_json = json.dumps([p.model_dump() for p in result.top_predictions])
+
+                    await db.execute(
+                        """
+                        INSERT INTO retained_audio_samples (
+                            id, filename, stored_filename, file_size_bytes, sha256_hash,
+                            duration_sec, sample_rate, channels, format, timestamp,
+                            recording_timestamp, zone_id, device_id, input_source,
+                            is_synthetic, model_id, model_version, prediction, score,
+                            confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
+                            review_status, ground_truth_label, verification_method, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            sample_id,
+                            file.filename,
+                            stored_fn,
+                            file_size,
+                            sha256_hash,
+                            duration_sec,
+                            sample_rate,
+                            channels,
+                            "WAV",
+                            now_iso,
+                            now_iso,
+                            zone_id or "zone-a",
+                            device_id or "esp32-zone-a-01",
+                            source_type,
+                            1 if source_type == "synthetic" else 0,
+                            result.model_id,
+                            result.model_id,
+                            result.prediction,
+                            result.score,
+                            result.confidence_band,
+                            top_preds_json,
+                            wf_json,
+                            peaks_json,
+                            "UNREVIEWED",
+                            "UNREVIEWED",
+                            "unverified",
+                            now_iso,
+                        ),
+                    )
+                    await db.commit()
+                    log.info("Persisted audio sample %s into dataset library", sample_id)
+                except Exception as store_err:
+                    log.error("Failed to store audio sample on disk/DB: %s", store_err)
+                    # We do not fail inference if storage encounters an issue, but log it
+                    sample_id = None
+
+        if sample_id:
+            result.audio_sample_id = sample_id
+            result.is_retained = True
+
     # Optionally persist to acoustic_events table so it appears in the Frigate review queue
-    if save_event and result.status in ("EXPERIMENTAL", "READY"):
+    if should_save_event and result.status in ("EXPERIMENTAL", "READY"):
         try:
             async with get_db() as db:
                 evt_id = f"evt-upload-{int(datetime.now(timezone.utc).timestamp())}"
@@ -826,8 +973,8 @@ async def upload_acoustic_recording(
                         now_iso,
                         zone_id or "zone-a",
                         device_id or "esp32-zone-a-01",
-                        "REAL",
-                        file.filename,
+                        "REAL" if source_type != "synthetic" else "MODEL_EXPERIMENT",
+                        sample_id or file.filename,
                         result.prediction,
                         result.model_id,
                         result.score,
@@ -838,7 +985,7 @@ async def upload_acoustic_recording(
                         result.inference_duration_ms,
                         "unreviewed",
                         tier,
-                        f"User uploaded WAV ({result.original_duration_sec}s, {result.window_mode})",
+                        f"Uploaded WAV ({result.original_duration_sec}s, {result.window_mode})",
                         wf_json,
                         peaks_json,
                     ),
@@ -849,5 +996,726 @@ async def upload_acoustic_recording(
             log.warning("Could not persist uploaded acoustic event: %s", db_err)
 
     return result
+
+
+def _row_to_audio_sample(row) -> RetainedAudioSample:
+    d = dict(row)
+    for field in ("top_predictions", "waveform_preview", "spectrogram_peaks"):
+        val = d.get(field)
+        if isinstance(val, str):
+            try:
+                d[field] = json.loads(val)
+            except Exception:
+                d[field] = [] if field == "top_predictions" else None
+    d["is_synthetic"] = bool(d.get("is_synthetic", 0))
+    return RetainedAudioSample(**d)
+
+
+# ─── Retained Audio Samples Library & Annotation APIs ────────────────────────
+@app.get("/api/audio-samples", response_model=List[RetainedAudioSample])
+async def list_audio_samples(
+    zone_id: Optional[str] = None,
+    ground_truth_label: Optional[str] = None,
+    review_status: Optional[str] = None,
+    input_source: Optional[str] = None,
+    is_synthetic: Optional[bool] = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """
+    Lists retained audio samples stored in the dataset library.
+    Supports filtering by zone, ground-truth label, review status, and synthetic flag.
+    """
+    query = "SELECT * FROM retained_audio_samples WHERE 1=1"
+    params: list = []
+
+    if zone_id:
+        query += " AND zone_id = ?"
+        params.append(zone_id)
+    if ground_truth_label:
+        query += " AND ground_truth_label = ?"
+        params.append(ground_truth_label)
+    if review_status:
+        query += " AND review_status = ?"
+        params.append(review_status)
+    if input_source:
+        query += " AND input_source = ?"
+        params.append(input_source)
+    if is_synthetic is not None:
+        query += " AND is_synthetic = ?"
+        params.append(1 if is_synthetic else 0)
+
+    query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([max(1, min(limit, 500)), max(0, offset)])
+
+    async with get_db() as db:
+        cursor = await db.execute(query, tuple(params))
+        rows = await cursor.fetchall()
+        return [_row_to_audio_sample(r) for r in rows]
+
+
+@app.get("/api/audio-samples/{sample_id}", response_model=RetainedAudioSample)
+async def get_audio_sample(sample_id: str):
+    """Retrieves metadata and annotations for a specific retained audio sample."""
+    async with get_db() as db:
+        cursor = await db.execute("SELECT * FROM retained_audio_samples WHERE id = ?", (sample_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Audio sample '{sample_id}' not found.")
+        return _row_to_audio_sample(row)
+
+
+@app.get("/api/audio-samples/{sample_id}/audio")
+async def get_audio_sample_file(sample_id: str):
+    """
+    Streams the retained WAV audio recording for playback or download.
+    Enforces strict path traversal defenses.
+    """
+    async with get_db() as db:
+        cursor = await db.execute("SELECT stored_filename, filename FROM retained_audio_samples WHERE id = ?", (sample_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Audio sample '{sample_id}' not found in database.")
+
+        stored_filename = row["stored_filename"]
+        download_name = row["filename"] or f"{sample_id}.wav"
+
+    path = get_audio_file_path(stored_filename)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Audio file missing from storage directory on disk.")
+
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        filename=download_name,
+        headers={"Accept-Ranges": "bytes"}
+    )
+
+
+@app.patch("/api/audio-samples/{sample_id}/annotation", response_model=RetainedAudioSample)
+async def update_sample_annotation(sample_id: str, body: AnnotationUpdateRequest):
+    """
+    Updates the independent physical ground-truth label and reviewer notes for a retained sample.
+    Does NOT equate anomaly predictions with verified biological observations.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rev_status = body.review_status or ("REVIEWED" if body.ground_truth_label != "UNREVIEWED" else "UNREVIEWED")
+
+    async with get_db() as db:
+        cursor = await db.execute("SELECT id FROM retained_audio_samples WHERE id = ?", (sample_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Audio sample '{sample_id}' not found.")
+
+        await db.execute(
+            """
+            UPDATE retained_audio_samples
+            SET ground_truth_label = ?,
+                verification_method = ?,
+                reviewer = ?,
+                evidence_notes = ?,
+                review_status = ?,
+                reviewed_at = ?
+            WHERE id = ?
+            """,
+            (
+                body.ground_truth_label,
+                body.verification_method or "unverified",
+                body.reviewer or "Inspector",
+                body.evidence_notes or "",
+                rev_status,
+                now_iso,
+                sample_id,
+            )
+        )
+        await db.commit()
+
+        cursor = await db.execute("SELECT * FROM retained_audio_samples WHERE id = ?", (sample_id,))
+        row = await cursor.fetchone()
+        return _row_to_audio_sample(row)
+
+
+@app.delete("/api/audio-samples/{sample_id}")
+async def delete_audio_sample(sample_id: str):
+    """
+    Safely deletes a retained audio sample from both the database and disk storage.
+    Prevents path traversal and cleans up storage.
+    """
+    async with get_db() as db:
+        cursor = await db.execute("SELECT stored_filename FROM retained_audio_samples WHERE id = ?", (sample_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Audio sample '{sample_id}' not found.")
+
+        stored_fn = row["stored_filename"]
+        delete_audio_file(stored_fn)
+
+        await db.execute("DELETE FROM retained_audio_samples WHERE id = ?", (sample_id,))
+        await db.commit()
+
+    return {"deleted": True, "sample_id": sample_id}
+
+
+@app.get("/api/dataset/manifest")
+async def export_dataset_manifest(
+    format: Literal["json", "csv"] = "json",
+    include_synthetic: bool = False,
+):
+    """
+    Exports a comprehensive dataset manifest of all retained audio recordings,
+    SHA-256 hashes, physical verification labels, and model prediction metadata.
+    Excludes synthetic signals by default.
+    """
+    query = "SELECT * FROM retained_audio_samples"
+    if not include_synthetic:
+        query += " WHERE is_synthetic = 0"
+    query += " ORDER BY created_at ASC"
+
+    async with get_db() as db:
+        cursor = await db.execute(query)
+        rows = await cursor.fetchall()
+        samples = [_row_to_audio_sample(r) for r in rows]
+
+    if format == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "id", "filename", "sha256_hash", "duration_sec", "sample_rate", "channels",
+            "zone_id", "device_id", "input_source", "is_synthetic", "prediction",
+            "score", "ground_truth_label", "verification_method", "reviewer", "reviewed_at",
+            "dataset_name", "source_species", "source_citation", "source_url", "transducer_type", "created_at"
+        ])
+        for s in samples:
+            writer.writerow([
+                s.id, s.filename, s.sha256_hash, s.duration_sec, s.sample_rate, s.channels,
+                s.zone_id, s.device_id, s.input_source, int(s.is_synthetic), s.prediction or "",
+                s.score if s.score is not None else "", s.ground_truth_label, s.verification_method,
+                s.reviewer or "", s.reviewed_at or "",
+                s.dataset_name or "", s.source_species or "", s.source_citation or "", s.source_url or "", s.transducer_type or "",
+                s.created_at
+            ])
+        csv_data = output.getvalue()
+        return Response(
+            content=csv_data,
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=sealsense_dataset_manifest.csv"}
+        )
+
+    return {
+        "manifest_version": "1.0",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_samples": len(samples),
+        "synthetic_included": include_synthetic,
+        "samples": [s.model_dump() for s in samples]
+    }
+
+
+@app.get("/api/dataset/evaluation", response_model=DatasetEvaluationReport)
+async def get_dataset_evaluation(threshold: float = 0.05):
+    """
+    Executes the offline bioacoustic evaluation harness across all retained samples.
+    Excludes synthetic and unreviewed recordings.
+    """
+    async with get_db() as db:
+        cursor = await db.execute("SELECT * FROM retained_audio_samples ORDER BY created_at DESC")
+        rows = await cursor.fetchall()
+        samples_dicts = [dict(r) for r in rows]
+
+    return evaluate_dataset_samples(samples_dicts, anomaly_threshold=threshold, verify_files_on_disk=True)
+
+
+# ─── USDA Bug Bytes Public Reference Dataset APIs ──────────────────
+@app.get("/api/reference/catalog", response_model=List[ReferenceAudioCatalogItem])
+async def get_reference_catalog():
+    """
+    Returns the catalog of authentic USDA Bug Bytes stored-product insect reference audio recordings.
+    Annotates each entry with local file availability on disk.
+    """
+    return [ReferenceAudioCatalogItem(**item) for item in list_reference_catalog()]
+
+
+@app.get("/api/reference/{catalog_id}/audio")
+async def get_reference_audio_file(catalog_id: str):
+    """
+    Streams an authentic local USDA Bug Bytes reference WAV file for preview/playback.
+    """
+    item = get_catalog_item(catalog_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Reference catalog item '{catalog_id}' not found.")
+    
+    file_path = get_reference_file_path(item["filename"])
+    if not file_path or not os.path.isfile(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reference audio file '{item['filename']}' is not present locally on disk."
+        )
+
+    return FileResponse(
+        file_path,
+        media_type="audio/wav",
+        filename=item["filename"],
+        headers={"Accept-Ranges": "bytes"}
+    )
+
+
+@app.post("/api/reference/import", response_model=AcousticInferenceResult)
+async def import_reference_sample(req: ReferenceImportRequest):
+    """
+    Imports an authentic USDA Bug Bytes stored-product insect reference recording,
+    executes Nocturne Mini inference, retains the original audio on disk if requested,
+    and tags it with explicit public_reference provenance (never hardware_recording).
+    """
+    item = get_catalog_item(req.catalog_id)
+    if not item:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Reference catalog item '{req.catalog_id}' not found.")
+
+    file_path = get_reference_file_path(item["filename"])
+    if not file_path or not os.path.isfile(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reference audio file '{item['filename']}' is not locally present on disk."
+        )
+
+    with open(file_path, "rb") as f:
+        wav_bytes = f.read()
+
+    adapter = NocturneMiniAdapter()
+    result = adapter.predict_wav_bytes(
+        wav_bytes,
+        filename=item["filename"],
+        input_source="public_reference",
+        top_k=5
+    )
+
+    result.input_source = "public_reference"
+    result.dataset_name = item["dataset_name"]
+    result.source_species = item["species"]
+    result.source_citation = item["citation"]
+    result.source_url = item["source_url"]
+    result.transducer_type = item["transducer_type"]
+
+    sample_id = None
+    if req.retain_sample:
+        sha256_hash = compute_sha256(wav_bytes)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        channels, sample_rate, duration_sec = validate_wav_bytes(wav_bytes)
+
+        async with get_db() as db:
+            await db.executescript(CREATE_SAMPLES)
+            cursor = await db.execute("SELECT id, stored_filename FROM retained_audio_samples WHERE sha256_hash = ?", (sha256_hash,))
+            existing = await cursor.fetchone()
+
+            if existing:
+                sample_id = existing["id"]
+                log.info("Reference upload matches existing sample hash %s -> reusing ID %s", sha256_hash, sample_id)
+            else:
+                sample_id = generate_sample_id()
+                try:
+                    stored_fn, stored_path, file_size = save_audio_file(sample_id, wav_bytes)
+                    wf_json = json.dumps(result.waveform_preview or [])
+                    peaks_clean = [
+                        {"freq_hz": p.get("frequency_hz", p.get("freq_hz", 0)), "db": p.get("magnitude_db", p.get("db", 0))}
+                        for p in (result.spectrogram_peaks or [])
+                    ]
+                    peaks_json = json.dumps(peaks_clean)
+                    top_preds_json = json.dumps([p.model_dump() for p in result.top_predictions])
+                    ev_notes = req.notes or f"USDA Bug Bytes reference recording of {item['species']} ({item['life_stage']}). Substrate: {item['substrate']}. Transducer: {item['transducer_type']}."
+
+                    await db.execute(
+                        """
+                        INSERT INTO retained_audio_samples (
+                            id, filename, stored_filename, file_size_bytes, sha256_hash,
+                            duration_sec, sample_rate, channels, format, timestamp,
+                            recording_timestamp, zone_id, device_id, input_source,
+                            is_synthetic, model_id, model_version, prediction, score,
+                            confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
+                            review_status, ground_truth_label, verification_method, reviewer,
+                            reviewed_at, evidence_notes, dataset_name, source_species,
+                            source_citation, source_url, transducer_type, source_category, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            sample_id,
+                            item["filename"],
+                            stored_fn,
+                            file_size,
+                            sha256_hash,
+                            duration_sec,
+                            sample_rate,
+                            channels,
+                            "WAV",
+                            now_iso,
+                            now_iso,
+                            req.zone_id,
+                            req.device_id,
+                            "public_reference",
+                            0,
+                            result.model_id,
+                            result.model_id,
+                            result.prediction,
+                            result.score,
+                            result.confidence_band,
+                            top_preds_json,
+                            wf_json,
+                            peaks_json,
+                            "REVIEWED",
+                            "TARGET_PEST_OBSERVED",
+                            "laboratory_reared_culture",
+                            "USDA-ARS CMAVE (Dr. Richard W. Mankin)",
+                            now_iso,
+                            ev_notes,
+                            item["dataset_name"],
+                            item["species"],
+                            item["citation"],
+                            item["source_url"],
+                            item["transducer_type"],
+                            item["category"],
+                            now_iso,
+                        ),
+                    )
+                    await db.commit()
+                    log.info("Persisted USDA Bug Bytes reference sample %s into library", sample_id)
+                except Exception as store_err:
+                    log.error("Failed to store reference audio sample: %s", store_err)
+                    sample_id = None
+
+        if sample_id:
+            result.audio_sample_id = sample_id
+            result.is_retained = True
+
+    return result
+
+
+# ─── Synthetic Bioacoustic Simulation Scenario Generator APIs ─────
+@app.post("/api/simulation/synthetic/generate", response_model=AcousticInferenceResult)
+async def generate_synthetic_simulation(req: SyntheticImpulseRequest):
+    """
+    Generates synthetic bioacoustic stored-grain insect impulses (click bursts),
+    optionally executes Nocturne Mini inference, and labels all outputs as SYNTHETIC SIMULATION.
+    Always sets is_synthetic=True and input_source='synthetic'.
+    """
+    wav_bytes = generate_synthetic_impulse_wav(
+        impulse_rate=req.impulse_rate,
+        amplitude=req.amplitude,
+        noise_level=req.noise_level,
+        duration_sec=req.duration_sec,
+        sample_rate=16000,
+        seed=req.seed,
+    )
+
+    adapter = NocturneMiniAdapter()
+    result = adapter.predict_wav_bytes(
+        wav_bytes,
+        filename=f"synthetic_simulation_seed_{req.seed}_{int(req.impulse_rate)}cps.wav",
+        input_source="synthetic",
+        top_k=5,
+    )
+
+    result.input_source = "synthetic"
+    result.simulation_params = {
+        "impulse_rate": req.impulse_rate,
+        "amplitude": req.amplitude,
+        "noise_level": req.noise_level,
+        "duration_sec": req.duration_sec,
+        "seed": req.seed,
+        "generator": "poisson_kernel_chewing_bursts",
+    }
+
+    sample_id = None
+    if req.retain_sample:
+        sha256_hash = compute_sha256(wav_bytes)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        channels, sample_rate, duration_sec = validate_wav_bytes(wav_bytes)
+
+        async with get_db() as db:
+            await db.executescript(CREATE_SAMPLES)
+            sample_id = generate_sample_id()
+            stored_fn, stored_path, file_size = save_audio_file(sample_id, wav_bytes)
+            wf_json = json.dumps(result.waveform_preview or [])
+            peaks_clean = [
+                {"freq_hz": p.get("frequency_hz", p.get("freq_hz", 0)), "db": p.get("magnitude_db", p.get("db", 0))}
+                for p in (result.spectrogram_peaks or [])
+            ]
+            peaks_json = json.dumps(peaks_clean)
+            top_preds_json = json.dumps([p.model_dump() for p in result.top_predictions])
+
+            await db.execute(
+                """
+                INSERT INTO retained_audio_samples (
+                    id, filename, stored_filename, file_size_bytes, sha256_hash,
+                    duration_sec, sample_rate, channels, format, timestamp,
+                    recording_timestamp, zone_id, device_id, input_source,
+                    is_synthetic, model_id, model_version, prediction, score,
+                    confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
+                    review_status, ground_truth_label, verification_method, reviewer,
+                    reviewed_at, evidence_notes, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sample_id,
+                    f"synthetic_simulation_seed_{req.seed}.wav",
+                    stored_fn,
+                    file_size,
+                    sha256_hash,
+                    duration_sec,
+                    sample_rate,
+                    channels,
+                    "WAV",
+                    now_iso,
+                    now_iso,
+                    req.zone_id,
+                    req.device_id,
+                    "synthetic",
+                    1,
+                    result.model_id,
+                    result.model_id,
+                    result.prediction,
+                    result.score,
+                    result.confidence_band,
+                    top_preds_json,
+                    wf_json,
+                    peaks_json,
+                    "REVIEWED",
+                    "INCONCLUSIVE",
+                    "unverified",
+                    "Synthetic Simulation Generator",
+                    now_iso,
+                    f"Synthetic click scenario (rate={req.impulse_rate} Hz, amp={req.amplitude}, noise={req.noise_level}, seed={req.seed}). STRICTLY EXCLUDED FROM EVALUATION.",
+                    now_iso,
+                ),
+            )
+            await db.commit()
+
+        if sample_id:
+            result.audio_sample_id = sample_id
+            result.is_retained = True
+
+    return result
+
+
+@app.get("/api/simulation/synthetic/wav")
+async def get_synthetic_simulation_wav(
+    impulse_rate: float = 12.0,
+    amplitude: float = 0.6,
+    noise_level: float = 0.04,
+    duration_sec: float = 10.0,
+    seed: int = 42,
+):
+    """
+    Directly streams a synthetic 16 kHz WAV file with the requested parameter settings
+    for browser audio playback or direct file download.
+    """
+    wav_bytes = generate_synthetic_impulse_wav(
+        impulse_rate=impulse_rate,
+        amplitude=amplitude,
+        noise_level=noise_level,
+        duration_sec=duration_sec,
+        sample_rate=16000,
+        seed=seed,
+    )
+    return Response(
+        content=wav_bytes,
+        media_type="audio/wav",
+        headers={
+            "Content-Disposition": f"inline; filename=synthetic_simulation_{int(impulse_rate)}cps_seed{seed}.wav",
+            "Accept-Ranges": "bytes",
+        }
+    )
+
+
+@app.post("/api/audio-samples/seed-demo")
+async def seed_demo_audio_samples():
+    """
+    Seeds initial realistic sample recordings and ground-truth inspection records
+    into the retained dataset library and filesystem storage for immediate demonstration.
+    """
+    import math
+
+    now = datetime.now(timezone.utc)
+    seeded_samples = [
+        {
+            "filename": "grain_probe_zone_a_weevil_cluster.wav",
+            "zone_id": "zone-a",
+            "device_id": "esp32-zone-a-01",
+            "input_source": "user_upload",
+            "is_synthetic": 0,
+            "prediction": "Eunemobius carolinus",
+            "score": 0.0842,
+            "confidence_band": "medium",
+            "ground_truth_label": "TARGET_PEST_OBSERVED",
+            "verification_method": "physical_trap_inspection",
+            "reviewer": "Dr. Aris Thorne (Entomologist)",
+            "evidence_notes": "Spear probe sample revealed 14 live Sitophilus oryzae adults in 500g grain sample.",
+            "duration_sec": 10.0,
+            "freq_center": 450.0,
+        },
+        {
+            "filename": "silo_b_ambient_aeration_quiet.wav",
+            "zone_id": "zone-b",
+            "device_id": "esp32-zone-b-01",
+            "input_source": "user_upload",
+            "is_synthetic": 0,
+            "prediction": "Canis lupus",
+            "score": 0.0121,
+            "confidence_band": "low",
+            "ground_truth_label": "NO_TARGET_PEST_OBSERVED",
+            "verification_method": "grain_sieve",
+            "reviewer": "Sarah Lin (QA Inspector)",
+            "evidence_notes": "Sieve inspection negative across 3 headspace sample trays. Sound matches ambient aeration fan rumble.",
+            "duration_sec": 10.0,
+            "freq_center": 180.0,
+        },
+        {
+            "filename": "silo_c_headspace_scratching.wav",
+            "zone_id": "zone-c",
+            "device_id": "esp32-zone-c-01",
+            "input_source": "user_upload",
+            "is_synthetic": 0,
+            "prediction": "Metaplastes ornatus",
+            "score": 0.0615,
+            "confidence_band": "medium",
+            "ground_truth_label": "INCONCLUSIVE",
+            "verification_method": "visual_sample",
+            "reviewer": "Marco Rossi (Silo Tech)",
+            "evidence_notes": "Acoustic scratch sound audible; surface grain inspection showed no insects. Awaiting deep pit trap results.",
+            "duration_sec": 10.0,
+            "freq_center": 520.0,
+        },
+        {
+            "filename": "browser_synthetic_chirp_smoke_test.wav",
+            "zone_id": "zone-a",
+            "device_id": "esp32-zone-a-01",
+            "input_source": "synthetic",
+            "is_synthetic": 1,
+            "prediction": "Sclerophrys poweri",
+            "score": 0.0095,
+            "confidence_band": "low",
+            "ground_truth_label": "UNREVIEWED",
+            "verification_method": "unverified",
+            "reviewer": None,
+            "evidence_notes": "Generated by browser synthetic signal tool. EXCLUDED from real-world dataset metrics.",
+            "duration_sec": 10.0,
+            "freq_center": 600.0,
+        },
+        {
+            "filename": "usda_bugbytes_accelrw.wav",
+            "zone_id": "zone-a",
+            "device_id": "esp32-zone-a-01",
+            "input_source": "public_reference",
+            "is_synthetic": 0,
+            "prediction": "Metaplastes ornatus",
+            "score": 0.0784,
+            "confidence_band": "medium",
+            "ground_truth_label": "TARGET_PEST_OBSERVED",
+            "verification_method": "laboratory_reared_culture",
+            "reviewer": "USDA-ARS CMAVE (Dr. Richard W. Mankin)",
+            "evidence_notes": "Authentic USDA Bug Bytes recording of Sitophilus oryzae (Rice weevil larvae, 16-17d) feeding in wheat kernels. Contact accelerometer transducer. Not hardware sensor data.",
+            "duration_sec": 10.0,
+            "freq_center": 420.0,
+            "dataset_name": "USDA Bug Bytes Sound Library: Stored Product Insect Pest Sounds",
+            "source_species": "Sitophilus oryzae",
+            "source_citation": "Mankin, R. W. (USDA-ARS CMAVE). DOI: 10.15482/USDA.ADC/1504600",
+            "source_url": "https://catalog.data.gov/dataset/bug-bytes-sound-library-stored-product-insect-pest-sounds",
+            "transducer_type": "Brüel & Kjær 4370 accelerometer (contact transducer)",
+            "source_category": "A. Stored product insect movement and feeding sounds",
+        },
+    ]
+
+    count = 0
+    async with get_db() as db:
+        for item in seeded_samples:
+            # Check if authentic reference file exists on disk
+            ref_path = get_reference_file_path(item.get("filename", "").replace("usda_bugbytes_", ""))
+            if ref_path and os.path.isfile(ref_path):
+                with open(ref_path, "rb") as rf:
+                    wav_bytes = rf.read()
+            else:
+                # Generate audio bytes for this file
+                sample_rate = 16000
+                num_samples = int(item["duration_sec"] * sample_rate)
+                buf = io.BytesIO()
+                with wave.open(buf, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sample_rate)
+                    raw_bytes = bytearray()
+                    freq = item["freq_center"]
+                    for i in range(num_samples):
+                        t = i / sample_rate
+                        val = 0.2 * math.sin(2 * math.pi * freq * t)
+                        int_val = int(max(-32768, min(32767, val * 32767)))
+                        raw_bytes.extend(int_val.to_bytes(2, "little", signed=True))
+                    wf.writeframes(raw_bytes)
+                wav_bytes = buf.getvalue()
+
+            sha256_hash = compute_sha256(wav_bytes)
+
+            cursor = await db.execute("SELECT id FROM retained_audio_samples WHERE sha256_hash = ?", (sha256_hash,))
+            if await cursor.fetchone():
+                continue
+
+            sample_id = generate_sample_id()
+            stored_fn, _, file_size = save_audio_file(sample_id, wav_bytes)
+            wf_preview = json.dumps([0.15, 0.22, 0.38, 0.65, 0.72, 0.45, 0.31, 0.18, 0.25, 0.49, 0.61, 0.35, 0.21, 0.15, 0.12, 0.09])
+            peaks_preview = json.dumps([{"freq_hz": item["freq_center"], "db": -24.5}])
+            top_preds = json.dumps([{"label": item["prediction"], "score": item["score"]}])
+
+            await db.execute(
+                """
+                INSERT INTO retained_audio_samples (
+                    id, filename, stored_filename, file_size_bytes, sha256_hash,
+                    duration_sec, sample_rate, channels, format, timestamp,
+                    recording_timestamp, zone_id, device_id, input_source,
+                    is_synthetic, model_id, model_version, prediction, score,
+                    confidence_band, top_predictions, waveform_preview, spectrogram_peaks,
+                    review_status, ground_truth_label, verification_method, reviewer,
+                    reviewed_at, evidence_notes, dataset_name, source_species,
+                    source_citation, source_url, transducer_type, source_category, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    sample_id,
+                    item["filename"],
+                    stored_fn,
+                    file_size,
+                    sha256_hash,
+                    item["duration_sec"],
+                    16000,
+                    1,
+                    "WAV",
+                    now.isoformat(),
+                    now.isoformat(),
+                    item["zone_id"],
+                    item["device_id"],
+                    item["input_source"],
+                    item["is_synthetic"],
+                    "stratus-labs/nocturne-v1-mini",
+                    "nocturne-v1-mini (EXPERIMENTAL)",
+                    item["prediction"],
+                    item["score"],
+                    item["confidence_band"],
+                    top_preds,
+                    wf_preview,
+                    peaks_preview,
+                    "REVIEWED" if item["ground_truth_label"] != "UNREVIEWED" else "UNREVIEWED",
+                    item["ground_truth_label"],
+                    item["verification_method"],
+                    item.get("reviewer"),
+                    now.isoformat() if item.get("reviewer") else None,
+                    item.get("evidence_notes"),
+                    item.get("dataset_name"),
+                    item.get("source_species"),
+                    item.get("source_citation"),
+                    item.get("source_url"),
+                    item.get("transducer_type"),
+                    item.get("source_category"),
+                    now.isoformat(),
+                )
+            )
+            count += 1
+
+        await db.commit()
+
+    return {"seeded": count, "message": f"Successfully seeded {count} demo audio samples with physical ground-truth annotations"}
+
 
 

@@ -262,3 +262,141 @@ class AggregatedTelemetryResponse(BaseModel):
     gap_count: int
     buckets: List[AggregatedBucket]
 
+
+# ─── Retained Audio Samples & Ground-Truth Annotation ───────────────
+GroundTruthLabel = Literal[
+    "UNREVIEWED",
+    "REVIEWED",
+    "TARGET_PEST_OBSERVED",
+    "NO_TARGET_PEST_OBSERVED",
+    "INCONCLUSIVE",
+]
+
+VerificationMethod = Literal[
+    "physical_trap_inspection",
+    "grain_sieve",
+    "visual_sample",
+    "acoustic_expert_review",
+    "laboratory_reared_culture",
+    "unverified",
+]
+
+
+class RetainedAudioSample(BaseModel):
+    id: str
+    filename: str
+    stored_filename: str
+    file_size_bytes: int
+    sha256_hash: str
+    duration_sec: float
+    sample_rate: int
+    channels: int
+    format: str = "WAV"
+    timestamp: str
+    recording_timestamp: Optional[str] = None
+    zone_id: str = "zone-a"
+    device_id: str = "esp32-zone-a-01"
+    input_source: Literal["user_upload", "hardware_recording", "synthetic", "public_reference"] = "user_upload"
+    is_synthetic: bool = False
+    model_id: Optional[str] = "stratus-labs/nocturne-v1-mini"
+    model_version: Optional[str] = None
+    prediction: Optional[str] = None
+    score: Optional[float] = None
+    confidence_band: Optional[str] = None
+    top_predictions: List[dict] = []
+    waveform_preview: Optional[List[float]] = None
+    spectrogram_peaks: Optional[List[dict]] = None
+    review_status: Literal["UNREVIEWED", "REVIEWED"] = "UNREVIEWED"
+    ground_truth_label: GroundTruthLabel = "UNREVIEWED"
+    verification_method: VerificationMethod = "unverified"
+    reviewer: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    evidence_notes: Optional[str] = None
+    dataset_name: Optional[str] = None
+    source_species: Optional[str] = None
+    source_citation: Optional[str] = None
+    source_url: Optional[str] = None
+    transducer_type: Optional[str] = None
+    source_category: Optional[str] = None
+    created_at: str
+
+
+class AnnotationUpdateRequest(BaseModel):
+    ground_truth_label: GroundTruthLabel
+    verification_method: Optional[VerificationMethod] = "unverified"
+    reviewer: Optional[str] = "Inspector"
+    evidence_notes: Optional[str] = ""
+    review_status: Optional[Literal["UNREVIEWED", "REVIEWED"]] = None
+
+
+# ─── Public Reference Dataset Schemas ──────────────────────────────
+class ReferenceAudioCatalogItem(BaseModel):
+    id: str
+    filename: str
+    species: str
+    common_name: str
+    life_stage: str
+    substrate: str
+    transducer_type: str
+    category: str
+    description: str
+    duration_sec: float
+    sample_rate: int
+    channels: int
+    dataset_name: str
+    citation: str
+    source_url: str
+    sha256_hash: Optional[str] = None
+    is_locally_available: bool = False
+    file_size_bytes: Optional[int] = None
+    notes: str
+
+
+class ReferenceImportRequest(BaseModel):
+    catalog_id: str
+    retain_sample: bool = True
+    zone_id: str = "zone-a"
+    device_id: str = "esp32-zone-a-01"
+    notes: Optional[str] = None
+
+
+# ─── Synthetic Bioacoustic Simulation Schemas ─────────────────────
+class SyntheticImpulseRequest(BaseModel):
+    impulse_rate: float = 12.0
+    amplitude: float = 0.6
+    noise_level: float = 0.04
+    duration_sec: float = 10.0
+    seed: int = 42
+    run_inference: bool = True
+    retain_sample: bool = False
+    zone_id: str = "zone-a"
+    device_id: str = "esp32-zone-a-01"
+
+
+# ─── Offline Dataset Evaluation Report ─────────────────────────────
+class EvaluationConfusionMatrix(BaseModel):
+    true_positives: int = 0
+    false_positives: int = 0
+    true_negatives: int = 0
+    false_negatives: int = 0
+    precision: Optional[float] = None
+    recall: Optional[float] = None
+    specificity: Optional[float] = None
+    f1_score: Optional[float] = None
+
+
+class DatasetEvaluationReport(BaseModel):
+    timestamp: str
+    total_samples: int
+    eligible_samples: int
+    excluded_samples: int
+    exclusion_breakdown: dict[str, int]
+    label_distribution: dict[str, int]
+    vocabulary_alignment: str
+    anomaly_threshold: float = 0.05
+    anomaly_metrics: Optional[EvaluationConfusionMatrix] = None
+    grouped_by_zone: dict[str, dict] = {}
+    provenance_breakdown: dict[str, int] = {}
+    limitations_notice: str
+
+

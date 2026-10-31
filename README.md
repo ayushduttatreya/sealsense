@@ -38,17 +38,27 @@
    - [Upload API Endpoint Contract](#upload-api-endpoint-contract)
    - [Audio Validation, Downmixing, and Resampling](#audio-validation-downmixing-and-resampling)
    - [Example cURL Upload Requests](#example-curl-upload-requests)
-   - [Browser Dropzone & Synthetic Chirp Generator](#browser-dropzone--synthetic-chirp-generator)
-8. [API Reference](#8-api-reference)
-9. [Database & Persistence Model](#9-database--persistence-model)
-10. [Hardware & ESP32 Firmware Guide](#10-hardware--esp32-firmware-guide)
+   - [Browser Dropzone & Three-Way Demo Workflow](#browser-dropzone--three-way-demo-workflow)
+8. [Public Reference Audio, Synthetic Simulation & Dataset Evaluation](#8-public-reference-audio-synthetic-simulation--dataset-evaluation)
+   - [Public Reference Dataset Integration (USDA Bug Bytes)](#public-reference-dataset-integration-usda-bug-bytes)
+   - [Synthetic Bioacoustic Impulse & Feeding Simulation](#synthetic-bioacoustic-impulse--feeding-simulation)
+   - [Defective Hardware Fallback & Three-Way Demonstration Workflow](#defective-hardware-fallback--three-way-demonstration-workflow)
+   - [Persistent Audio Storage Outside SQLite](#persistent-audio-storage-outside-sqlite)
+   - [Sample Metadata, Provenance & Ground-Truth States](#sample-metadata-provenance--ground-truth-states)
+   - [Independent Physical Verification Methods](#independent-physical-verification-methods)
+   - [Scientific Guardrails & Taxonomic Boundaries](#scientific-guardrails--taxonomic-boundaries)
+   - [Offline Evaluation Utility (CLI)](#offline-evaluation-utility-cli)
+   - [Dataset Manifest Export (JSON & CSV)](#dataset-manifest-export-json--csv)
+9. [API Reference](#9-api-reference)
+10. [Database & Persistence Model](#10-database--persistence-model)
+11. [Hardware & ESP32 Firmware Guide](#11-hardware--esp32-firmware-guide)
     - [Wiring & Pinout Reference](#wiring--pinout-reference)
     - [Firmware Configuration & Upload](#firmware-configuration--upload)
     - [Crucial Domain Distinction: Air RH vs. Grain Moisture](#crucial-domain-distinction-air-rh-vs-grain-moisture)
-11. [Testing & Verification Suites](#11-testing--verification-suites)
-12. [Development Workflow & Extension Guide](#12-development-workflow--extension-guide)
-13. [Security & Production Considerations](#13-security--production-considerations)
-14. [Implementation Status & Roadmap](#14-implementation-status--roadmap)
+12. [Testing & Verification Suites](#12-testing--verification-suites)
+13. [Development Workflow & Extension Guide](#13-development-workflow--extension-guide)
+14. [Security & Production Considerations](#14-security--production-considerations)
+15. [Implementation Status & Roadmap](#15-implementation-status--roadmap)
 
 ---
 
@@ -318,6 +328,7 @@ SealSense provides sensible defaults for local development out of the box. You c
 |---|---|---|---|---|
 | `VITE_API_URL` | Frontend | No | `http://localhost:8000` | Backend API base URL consumed by Vite frontend. |
 | `SEALSENSE_DB` | Backend | No | `sealsense.db` | Relative or absolute path to the local SQLite database. |
+| `SEALSENSE_AUDIO_DIR` | Backend | No | `backend/data/audio_samples` | Directory for persistent audio recordings (outside SQLite). Excluded from Git. |
 | `PORT` | Backend | No | `8000` | HTTP listening port for uvicorn. |
 | `HOST` | Backend | No | `0.0.0.0` | Network interface binding for uvicorn. |
 
@@ -439,7 +450,10 @@ Python 3.12.3 (x86_64 / Linux)
   - `file` *(UploadFile, required)*: The WAV audio recording.
   - `zone_id` *(string, optional, default: `"zone-a"`)*: Storage zone origin.
   - `device_id` *(string, optional, default: `"esp32-zone-a-01"`)*: Sensor node identifier.
-  - `save_event` *(boolean, optional, default: `false`)*: Whether to persist the inference result into the database review queue.
+  - `save_event` *(boolean, optional, default: `false`)*: Whether to persist the inference result into the event review queue.
+  - `retain_sample` *(boolean, optional, default: `false`)*: Whether to retain raw WAV audio bytes on disk in the dataset library (`SEALSENSE_AUDIO_DIR`). Does not silently change retention behavior; must be explicitly requested.
+  - `is_synthetic` *(boolean, optional, default: `false`)*: Flags synthetic benchmark signals (e.g. browser test sweeps) to prevent them from entering real-world evaluation datasets.
+  - `input_source` *(string, optional, default: `"user_upload"`)*: Input classification (`"user_upload"`, `"synthetic"`, or `"hardware_recording"`).
 
 ### Audio Validation, Downmixing, and Resampling
 The upload pipeline ([`backend/app/adapters/nocturne.py`](backend/app/adapters/nocturne.py)) enforces rigorous audio checks:
@@ -454,12 +468,14 @@ The upload pipeline ([`backend/app/adapters/nocturne.py`](backend/app/adapters/n
 
 ### Example cURL Upload Requests
 
-#### 1. Upload a field recording:
+#### 1. Upload a field recording with dataset retention:
 ```bash
 curl -X POST http://localhost:8000/api/inference/acoustic/upload \
   -F "file=@/path/to/silo_recording.wav" \
   -F "zone_id=zone-a" \
-  -F "save_event=true"
+  -F "save_event=true" \
+  -F "retain_sample=true" \
+  -F "input_source=user_upload"
 ```
 
 #### Expected JSON Response:
@@ -495,18 +511,139 @@ curl -X POST http://localhost:8000/api/inference/acoustic/upload \
   "original_sample_rate": 44100,
   "original_channels": 2,
   "original_duration_sec": 4.5,
-  "window_mode": "padded"
+  "window_mode": "padded",
+  "audio_sample_id": "samp-204f70c6cbdb",
+  "is_retained": true
 }
 ```
 
-### Browser Dropzone & Synthetic Chirp Generator
-In the web interface ([`src/pages/AcousticMonitoring.tsx`](src/pages/AcousticMonitoring.tsx)):
-- **Drag-and-Drop Dropzone:** Drag any `.wav` file into the upload card.
-- **Quick Test (Synthetic Chirp):** Click **"Quick Test: 10s Synthetic Chirp"** to generate an in-browser 10.0-second 16 kHz frequency-modulated sweep (200–800 Hz) packed into an in-memory WAV Blob and submit it to the backend immediately.
+### Browser Dropzone & Three-Way Demo Workflow
+In the web interface ([`src/pages/AcousticMonitoring.tsx`](src/pages/AcousticMonitoring.tsx)), operators and evaluators are presented with a three-way input selector designed for transparent demonstration and testing without physical sensor fabrication:
+1. **📚 Public Reference Audio:** Authenticated laboratory recordings from the USDA Bug Bytes stored-grain insect sound library.
+2. **⚡ Synthetic Simulation:** Stochastic Poisson impulse generator simulating kernel feeding clicks with adjustable parameters.
+3. **🎙️ Live Hardware Recording (Unavailable):** Diagnostic notice explaining that the physical INMP441 microphone is defective and live acoustic capture is temporarily halted.
+4. **📁 Custom WAV Upload:** Secondary dropzone allowing arbitrary WAV uploads (up to 20 MB).
 
 ---
 
-## 8. API Reference
+## 8. Public Reference Audio, Synthetic Simulation & Dataset Evaluation
+
+### Public Reference Dataset Integration (USDA Bug Bytes)
+Due to a hardware defect in our local INMP441 microphone module, live biological grain acoustic observations cannot currently be acquired from physical silos. To provide a rigorous, non-fabricated demonstration workflow, SealSense integrates authenticated recordings from the **USDA Bug Bytes Sound Library**:
+- **Source Catalog:** [USDA Bug Bytes Sound Library (Data.gov)](https://catalog.data.gov/dataset/bug-bytes-sound-library-stored-product-insect-pest-sounds) and [DataLumos Project 250370](https://www.datalumos.org/datalumos/project/250370/version/V1/view).
+- **Citation & Attribution:** Dr. Richard W. Mankin (USDA-ARS CMAVE, Gainesville, FL). DOI: `10.15482/USDA.ADC/1504600`.
+- **License & Rights:** U.S. Government Work (U.S. Public Domain).
+- **Target Pest Species Identified:**
+  - *Sitophilus oryzae* (Rice weevil larvae, 16–18d) feeding in wheat kernels.
+  - *Plodia interpunctella* (Indian meal moth larvae) feeding in dry cereal food media.
+  - *Sitophilus zeamais* (Maize weevil) and *Prostephanus truncatus* (Larger grain borer).
+- **Recording Transducers & Conditions:**
+  - Brüel & Kjær 4370 Charge Accelerometers attached to acoustic chambers.
+  - Piezoelectric disk sensors and PVDF polymer film sensors.
+  - Ultrasonic acoustic emission sensors (30 kHz and 40 kHz resonance).
+- **Local Storage Outside Git:** Reference WAV recordings are stored in `backend/data/reference_datasets/bug_bytes/`, which is strictly excluded from Git via `.gitignore`.
+- **Taxonomic Provenance:** Each imported reference recording retains:
+  - `input_source = "public_reference"` (never labeled as `hardware_recording`).
+  - Original species, substrate, transducer type, sample rate, channels, duration, SHA-256 hash, and citation URL.
+  - Initial ground truth set to `TARGET_PEST_OBSERVED` with verification method `laboratory_reared_culture`.
+
+### Synthetic Bioacoustic Impulse & Feeding Simulation
+SealSense provides a deterministic bioacoustic scenario generator ([`backend/app/synthetic_generator.py`](backend/app/synthetic_generator.py)) modeling the acoustic clicks produced by internal kernel-feeding insect larvae:
+- **Poisson Click Process:** Simulates chewing, locomotion, and head-capsule snapping as a stochastic Poisson impulse train with exponential decay bursts (1.8–3.6 kHz).
+- **Configurable Parameters:**
+  - **Impulse Rate (`impulse_rate`):** Adjustable from 1.0 to 50.0 clicks/sec (typical grain larvae rate: 5–25 Hz).
+  - **Amplitude (`amplitude`):** Peak signal-to-noise ratio scaling (0.1 to 1.0).
+  - **Background Noise (`noise_level`):** Additive Gaussian white noise simulating ambient silo drafts (0.0 to 0.2).
+  - **Window Duration (`duration_sec`):** Window length (5.0s to 15.0s, standardized to 10.0s for Nocturne).
+  - **Deterministic Seed (`seed`):** Integer seed ensuring exact waveform reproducibility for regression testing.
+- **WAV Export:** Direct download link (`GET /api/simulation/synthetic/wav`) generates high-fidelity 16-bit PCM WAV audio for external analysis.
+- **Evaluation Exclusion Guardrail:** All synthetic recordings are explicitly tagged with `is_synthetic = 1` and `input_source = "synthetic"`. Synthetic samples are **strictly excluded** from scientific dataset evaluation and confusion matrix metrics.
+
+### Defective Hardware Fallback & Three-Way Demonstration Workflow
+SealSense strictly adheres to scientific integrity principles:
+> [!IMPORTANT]
+> **No Biological Fabrication:**
+> We currently have a defective INMP441 microphone element on sensor node `esp32-zone-a-01` and do not maintain living insect cultures in our test facility.
+> SealSense **never** fabricates biological sensor measurements, simulates live microphone telemetry as "hardware", or labels reference files as `hardware_recording`.
+> The operator interface prominently displays the offline hardware status and provides authentic USDA Bug Bytes recordings and synthetic simulation modes for pipeline validation.
+
+### Persistent Audio Storage Outside SQLite
+Original WAV audio files are stored directly on the host filesystem under a dedicated storage directory, keeping SQLite lightweight:
+- **Configurable Location:** Specified by `SEALSENSE_AUDIO_DIR` (defaults to `backend/data/audio_samples/`).
+- **Git Safety:** The entire `data/` and `backend/data/` directories are explicitly excluded in `.gitignore` to prevent committing audio files.
+- **Filename Collision Prevention:** Each sample receives a unique identifier (`samp-{uuid12}.wav`).
+- **Integrity & Duplicate Prevention:** Every file is hashed with **SHA-256**. Uploading identical audio bytes reuses the existing sample record rather than duplicating storage.
+- **Strict Format Verification:** [`backend/app/audio_storage.py`](backend/app/audio_storage.py) uses Python's standard `wave` module to verify channels, sample rate, and byte depth before writing.
+- **Path Traversal Defense:** Sample IDs are strictly validated with `^[a-zA-Z0-9_\-]+$`. Any request containing `..`, slashes, or null bytes is rejected with `HTTP 400 Bad Request`.
+- **Safe Deletion:** Deleting a sample (`DELETE /api/audio-samples/{id}`) safely unlinks the file from disk (handling orphaned files gracefully) and deletes its database record.
+
+### Sample Metadata & Ground-Truth States
+Each retained audio sample is tracked in the `retained_audio_samples` table with the following metadata:
+- `id`: Unique sample identifier (`samp-...`).
+- `filename`: Original upload filename.
+- `file_path`: Absolute filesystem path outside SQLite.
+- `sha256_hash`: Cryptographic checksum for integrity and duplicate prevention.
+- `sample_rate`, `channels`, `duration_sec`: Verified audio parameters.
+- `input_source`: Source category (`synthetic`, `user_upload`, or `hardware_recording`).
+- `is_synthetic`: Boolean exclusion flag.
+- `prediction`, `score`, `confidence_band`: Nocturne Mini output at ingestion time.
+- `review_status`: Review workflow status (`UNREVIEWED`, `REVIEWED`).
+- `ground_truth_label`: Independent physical observation state:
+  - `UNREVIEWED`: Newly ingested sample awaiting physical trap check.
+  - `REVIEWED`: Preliminary review completed without definitive physical trap findings.
+  - `TARGET_PEST_OBSERVED`: Physical sampling confirmed live target insects in grain mass.
+  - `NO_TARGET_PEST_OBSERVED`: Physical inspection confirmed clean grain / pest-free.
+  - `INCONCLUSIVE`: Ambiguous physical findings (e.g. traps still incubating, low trap count).
+- `verification_method`: Physical sampling technique used to verify presence.
+- `reviewer` & `reviewed_at`: Inspector name and timestamp.
+- `evidence_notes`: Detailed physical observation evidence (e.g., insect count, sieve mesh size, trap location).
+
+### Independent Physical Verification Methods
+Ground truth must be established by independent physical evidence, never by model prediction:
+- `physical_trap_inspection`: Spear probe pitfall trap inserted into bulk grain mass.
+- `grain_sieve`: Standardized multi-mesh sieve tray screening of core samples.
+- `visual_sample`: Surface headspace visual inspection or conveyor discharge sample.
+- `acoustic_expert_review`: Entomologist audio spectrogram analysis.
+- `unverified`: Default state before physical inspection.
+
+### Scientific Guardrails & Taxonomic Boundaries
+> [!CAUTION]
+> **Taxonomic Vocabulary Alignment:**
+> Nocturne Mini was trained on an outdoor biodiversity corpus (InsectSet459 / iNat-Sounds-2024; 2,182 species) composed of outdoor wild insects, birds, and amphibians. It does **not** contain a validated stored-grain pest taxonomy (*Sitophilus oryzae*, *Rhyzopertha dominica*, *Tribolium castaneum*).
+> 
+> SealSense **does not** fabricate arbitrary mappings between wild outdoor species labels and storage beetles. Instead, offline evaluation uses an **acoustic anomaly score threshold** (default: `0.05`) to evaluate whether elevated acoustic energy / activations correlate with physically confirmed pest presence.
+> 
+> **Evaluation Exclusion Guardrails:**
+> - **Synthetic samples (`is_synthetic = 1`) are strictly excluded** from real-world evaluation metrics.
+> - **Unreviewed recordings (`UNREVIEWED`) and inconclusive findings (`INCONCLUSIVE`) are strictly excluded** to preserve evaluation integrity.
+
+### Offline Evaluation Utility (CLI)
+A standalone, reproducible evaluation CLI is provided at [`backend/evaluate_dataset.py`](backend/evaluate_dataset.py):
+
+```bash
+# Run evaluation with default anomaly decision threshold (0.05)
+backend/.venv/bin/python3 backend/evaluate_dataset.py
+
+# Specify custom threshold and export JSON report
+backend/.venv/bin/python3 backend/evaluate_dataset.py --threshold 0.08 --output eval_report.json
+```
+
+The report provides:
+1. Total, eligible, and excluded sample counts with complete exclusion breakdown.
+2. Ground-truth label distribution.
+3. Confusion matrix ($TP, FP, TN, FN$) against physical observations.
+4. Precision, Recall (Sensitivity), Specificity, and F1 score (or an explicit statement if insufficient samples exist).
+5. Explicit taxonomic and biological limitations statement.
+
+### Dataset Manifest Export (JSON & CSV)
+Reproducible dataset manifests can be exported via the API:
+- `GET /api/dataset/manifest?format=json`: Complete structured JSON manifest including SHA-256 hashes and evidence notes.
+- `GET /api/dataset/manifest?format=csv`: Flat CSV export suitable for external statistical packages and tabular review.
+- Pass `include_synthetic=true` to include benchmark test chirps in the export.
+
+---
+
+## 9. API Reference
 
 All routes are implemented in [`backend/app/main.py`](backend/app/main.py):
 
@@ -533,13 +670,28 @@ All routes are implemented in [`backend/app/main.py`](backend/app/main.py):
 | **Machine Learning & Inference** | | |
 | `GET` | `/api/models/status` | Returns actual readiness and dependency status for Nocturne Mini and Zeus adapters. |
 | `POST` | `/api/inference/acoustic` | JSON-based acoustic inference taking raw float sample arrays and sample rate. |
-| `POST` | `/api/inference/acoustic/upload` | Multipart WAV file upload performing audio validation, resampling, and Nocturne inference. |
+| `POST` | `/api/inference/acoustic/upload` | Multipart WAV file upload performing audio validation, resampling, Nocturne inference, and optional retention. |
+| **Acoustic Dataset & Evaluation** | | |
+| `GET` | `/api/audio-samples` | Lists retained audio samples. Filters: `zone_id`, `ground_truth_label`, `is_synthetic`, `limit`. |
+| `GET` | `/api/audio-samples/{id}` | Retrieves full metadata and annotation for a single retained sample. |
+| `GET` | `/api/audio-samples/{id}/audio` | Streams authorized WAV recording from disk (`audio/wav`) for browser playback. |
+| `PATCH` | `/api/audio-samples/{id}/annotation` | Updates ground-truth label, verification method, reviewer, and physical evidence notes. |
+| `DELETE` | `/api/audio-samples/{id}` | Safely deletes retained recording from disk and removes database row. |
+| `GET` | `/api/dataset/manifest` | Exports reproducible dataset manifest in JSON or CSV (`format=json|csv`). |
+| `GET` | `/api/dataset/evaluation` | Computes offline evaluation report, confusion matrix, and performance metrics. Query param: `threshold`. |
+| `POST` | `/api/audio-samples/seed-demo` | Seeds demo verified and unreviewed samples for immediate evaluation testing. |
+| **Public Reference Dataset & Simulation** | | |
+| `GET` | `/api/reference/catalog` | Lists available USDA Bug Bytes stored-grain pest reference recordings with local disk status. |
+| `GET` | `/api/reference/{id}/audio` | Streams authentic reference WAV recording directly from local disk (`audio/wav`). |
+| `POST` | `/api/reference/import` | Ingests reference audio, runs Nocturne Mini inference, and retains with `input_source='public_reference'`. |
+| `POST` | `/api/simulation/synthetic/generate` | Generates deterministic Poisson click audio, executes Nocturne inference, and flags `is_synthetic=1`. |
+| `GET` | `/api/simulation/synthetic/wav` | Generates on-demand synthetic impulse WAV audio for download and external analysis. |
 | **Demo Scenarios** | | |
 | `POST` | `/api/demo/scenario` | Switches active simulated scenario (`healthy_storage`, `rising_environmental_risk`, etc.). |
 
 ---
 
-## 9. Database & Persistence Model
+## 10. Database & Persistence Model
 
 SealSense uses an asynchronous SQLite database via `aiosqlite` located at `sealsense.db` (configurable via `SEALSENSE_DB`).
 
@@ -562,13 +714,24 @@ SealSense uses an asynchronous SQLite database via `aiosqlite` located at `seals
    - `triggered_by TEXT NOT NULL DEFAULT '[]'`, `alarm_state TEXT NOT NULL DEFAULT 'active_unack'`
    - `acknowledged INTEGER NOT NULL DEFAULT 0`, `acknowledged_at TEXT`, `acknowledged_by TEXT`, `inspection_notes TEXT`
    - `cleared INTEGER NOT NULL DEFAULT 0`, `cleared_at TEXT`, `cleared_by TEXT`, `clear_notes TEXT`
+4. `retained_audio_samples`:
+   - `id TEXT PRIMARY KEY` (`samp-...`), `filename TEXT NOT NULL`, `file_path TEXT NOT NULL`
+   - `uploaded_at TEXT NOT NULL`, `recording_timestamp TEXT`, `zone_id TEXT NOT NULL`, `device_id TEXT NOT NULL`
+   - `duration_sec REAL NOT NULL`, `sample_rate INTEGER NOT NULL`, `channels INTEGER NOT NULL`
+   - `sha256_hash TEXT NOT NULL` *(indexed for deduplication)*
+   - `input_source TEXT NOT NULL` (`synthetic`, `user_upload`, `hardware_recording`)
+   - `is_synthetic INTEGER NOT NULL DEFAULT 0` *(indexed for evaluation exclusion)*
+   - `model_id TEXT`, `model_version TEXT`, `prediction TEXT`, `score REAL`, `confidence_band TEXT`
+   - `review_status TEXT NOT NULL DEFAULT 'UNREVIEWED'` (`UNREVIEWED`, `REVIEWED`)
+   - `ground_truth_label TEXT NOT NULL DEFAULT 'UNREVIEWED'` *(indexed; `UNREVIEWED`, `REVIEWED`, `TARGET_PEST_OBSERVED`, `NO_TARGET_PEST_OBSERVED`, `INCONCLUSIVE`)*
+   - `verification_method TEXT`, `reviewer TEXT`, `reviewed_at TEXT`, `evidence_notes TEXT`
 
 ### Safe Schema Migrations
 The database initializes automatically on startup (`init_db()`). Safe non-destructive column additions (`ALTER TABLE ... ADD COLUMN ...`) run automatically inside try-except blocks, ensuring existing databases upgrade seamlessly without data loss.
 
 ---
 
-## 10. Hardware & ESP32 Firmware Guide
+## 11. Hardware & ESP32 Firmware Guide
 
 The reference firmware is implemented in [`firmware/sealsense_node/sealsense_node.ino`](firmware/sealsense_node/sealsense_node.ino) for the **ESP32 DevKit / ESP32-WROOM-32**.
 
@@ -608,31 +771,51 @@ The reference firmware is implemented in [`firmware/sealsense_node/sealsense_nod
 
 ---
 
-## 11. Testing & Verification Suites
+## 12. Testing & Verification Suites
 
 Every component in SealSense is covered by automated verification suites:
 
-### 1. Model Adapter Unit Tests
+### 1. Acoustic Dataset & Evaluation Tests
+Validates persistent sample storage, SHA-256 duplicate detection, safe deletion, path traversal defense, ground-truth transitions, synthetic sample exclusion, and manifest export:
+```bash
+backend/.venv/bin/python3 -m unittest backend/tests/test_dataset_evaluation.py
+```
+*Expected: 8 tests passed.*
+
+### 2. Model Adapter Unit Tests
 Validates adapter isolation, lazy loading, audio preprocessing, window shaping (exact/padded/truncated), rejection rules, and genuine model execution:
 ```bash
 backend/.venv/bin/python3 -m unittest backend/tests/test_model_adapters.py
 ```
 *Expected: 17 tests passed.*
 
-### 2. REA Product Feature Verification Tests
+### 3. Public Reference Dataset & Simulation Tests
+Validates USDA Bug Bytes catalog lookup, local WAV file headers, deterministic Poisson click generator reproducibility, reference WAV import with full taxonomic provenance (`input_source='public_reference'`), synthetic simulation generation (`is_synthetic=1`), and strict evaluation exclusion:
+```bash
+backend/.venv/bin/python3 -m unittest backend/tests/test_reference_and_simulation.py
+```
+*Expected: 5 tests passed.*
+
+### 4. REA Product Feature Verification Tests
 Validates SQLite schema migrations, 4-state alarm lifecycles, Edge Impulse human review, device inactivity timeouts, domain guardrails, Home Assistant execution traces, Frigate event triage, and InfluxDB telemetry downsampling:
 ```bash
 backend/.venv/bin/python3 backend/tests/test_rea_features.py
 ```
 *Expected: 8/8 verification suites passed.*
 
-### 3. Model Compatibility Diagnostic
+### 5. Offline Dataset Evaluation CLI
+Executes the reproducible evaluation harness over all retained samples and outputs confusion matrices and performance metrics:
+```bash
+backend/.venv/bin/python3 backend/evaluate_dataset.py --threshold 0.05
+```
+
+### 5. Model Compatibility Diagnostic
 Checks installed ML packages, tests Hugging Face local cache loading, and reports CPU inference latency:
 ```bash
 backend/.venv/bin/python3 backend/model_adapter_test.py
 ```
 
-### 4. Frontend Production Build
+### 6. Frontend Production Build
 Validates TypeScript typings and builds the production bundle:
 ```bash
 npm run build
@@ -641,7 +824,7 @@ npm run build
 
 ---
 
-## 12. Development Workflow & Extension Guide
+## 13. Development Workflow & Extension Guide
 
 ### Adding a New API Endpoint
 1. Define request and response schemas in [`backend/app/models.py`](backend/app/models.py).
@@ -665,9 +848,10 @@ npm run build
 
 ---
 
-## 13. Security & Production Considerations
+## 14. Security & Production Considerations
 
 - **Secrets & Credentials:** Never hardcode credentials in code. `.gitignore` strictly ignores `.env`, `*.pem`, `*.key`, and `*.db`.
+- **Audio Storage Isolation:** Audio files are stored outside SQLite in `backend/data/audio_samples/`. Sample IDs are validated with `^[a-zA-Z0-9_\-]+$` to strictly prevent path traversal attacks.
 - **Upload Restrictions:** `POST /api/inference/acoustic/upload` restricts payloads to 20 MB and enforces magic bytes verification (`RIFF`/`WAVE`) before passing audio to libsndfile.
 - **CORS Configuration:** `backend/app/main.py` explicitly whitelists Vite development ports (`5173` and `4173`). Update `allow_origins` before deploying to a production domain.
 - **Production Server:** For production deployments, run Uvicorn behind a reverse proxy (Nginx or Caddy) with systemd process supervision:
@@ -677,7 +861,7 @@ npm run build
 
 ---
 
-## 14. Implementation Status & Roadmap
+## 15. Implementation Status & Roadmap
 
 ### Implemented
 - [x] Responsive 5-page industrial operator console (Overview, Zones, Alerts, Acoustic, Devices).
@@ -689,6 +873,10 @@ npm run build
 - [x] Edge Impulse-style human validation with inspector notes and audit trails.
 - [x] Nocturne Mini (`stratus-labs/nocturne-v1-mini`) lazy-loaded CPU inference (~85 ms).
 - [x] Recorded WAV audio ingestion pipeline with strict RIFF validation, mono downmix, and 16 kHz resampling.
+- [x] Persistent audio sample storage outside SQLite (`backend/data/audio_samples/`) with SHA-256 deduplication and path traversal protection.
+- [x] Independent physical ground-truth annotation workflow (`TARGET_PEST_OBSERVED`, `NO_TARGET_PEST_OBSERVED`, `INCONCLUSIVE`).
+- [x] Offline evaluation harness CLI (`backend/evaluate_dataset.py`) with confusion matrices, exclusion breakdowns, and taxonomic guardrails.
+- [x] Dataset manifest exports in JSON and CSV formats.
 - [x] Browser-based synthetic audio chirp generator for instant testing.
 - [x] ESP32 reference firmware with SCD41 I2C driver and INMP441 I2S DMA acquisition.
 

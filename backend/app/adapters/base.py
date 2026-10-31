@@ -52,12 +52,20 @@ class AcousticInferenceResult(BaseModel):
     error: Optional[str] = None
     reason: Optional[str] = None
     # Audio ingestion and upload metadata
-    input_source: Literal["user_upload", "synthetic", "live_stream"] = "synthetic"
+    input_source: Literal["user_upload", "synthetic", "live_stream", "public_reference", "hardware_recording"] = "synthetic"
     filename: Optional[str] = None
     original_sample_rate: Optional[int] = None
     original_channels: Optional[int] = None
     original_duration_sec: Optional[float] = None
     window_mode: Optional[Literal["exact", "padded", "truncated"]] = None
+    audio_sample_id: Optional[str] = None
+    is_retained: bool = False
+    dataset_name: Optional[str] = None
+    source_species: Optional[str] = None
+    source_citation: Optional[str] = None
+    source_url: Optional[str] = None
+    transducer_type: Optional[str] = None
+    simulation_params: Optional[dict] = None
 
 
 class ZeusInferenceResult(BaseModel):

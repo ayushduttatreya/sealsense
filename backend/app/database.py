@@ -66,6 +66,51 @@ CREATE TABLE IF NOT EXISTS alerts (
 )
 """
 
+CREATE_SAMPLES = """
+CREATE TABLE IF NOT EXISTS retained_audio_samples (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    stored_filename TEXT NOT NULL,
+    file_size_bytes INTEGER NOT NULL,
+    sha256_hash TEXT NOT NULL,
+    duration_sec REAL NOT NULL,
+    sample_rate INTEGER NOT NULL,
+    channels INTEGER NOT NULL,
+    format TEXT NOT NULL DEFAULT 'WAV',
+    timestamp TEXT NOT NULL,
+    recording_timestamp TEXT,
+    zone_id TEXT NOT NULL DEFAULT 'zone-a',
+    device_id TEXT NOT NULL DEFAULT 'esp32-zone-a-01',
+    input_source TEXT NOT NULL DEFAULT 'user_upload',
+    is_synthetic INTEGER NOT NULL DEFAULT 0,
+    model_id TEXT,
+    model_version TEXT,
+    prediction TEXT,
+    score REAL,
+    confidence_band TEXT,
+    top_predictions TEXT,
+    waveform_preview TEXT,
+    spectrogram_peaks TEXT,
+    review_status TEXT NOT NULL DEFAULT 'UNREVIEWED',
+    ground_truth_label TEXT NOT NULL DEFAULT 'UNREVIEWED',
+    verification_method TEXT DEFAULT 'unverified',
+    reviewer TEXT,
+    reviewed_at TEXT,
+    evidence_notes TEXT,
+    dataset_name TEXT,
+    source_species TEXT,
+    source_citation TEXT,
+    source_url TEXT,
+    transducer_type TEXT,
+    source_category TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_retained_audio_hash ON retained_audio_samples(sha256_hash);
+CREATE INDEX IF NOT EXISTS idx_retained_audio_label ON retained_audio_samples(ground_truth_label);
+CREATE INDEX IF NOT EXISTS idx_retained_audio_synthetic ON retained_audio_samples(is_synthetic);
+CREATE INDEX IF NOT EXISTS idx_retained_audio_source ON retained_audio_samples(input_source);
+"""
+
 
 @asynccontextmanager
 async def get_db():
@@ -79,6 +124,7 @@ async def init_db():
         await db.execute(CREATE_READINGS)
         await db.execute(CREATE_EVENTS)
         await db.execute(CREATE_ALERTS)
+        await db.executescript(CREATE_SAMPLES)
         
         # Safe migrations for existing SQLite database files
         migrations = [
@@ -95,6 +141,12 @@ async def init_db():
             ("acoustic_events", "reviewed_by", "TEXT"),
             ("acoustic_events", "waveform_preview", "TEXT"),
             ("acoustic_events", "spectrogram_peaks", "TEXT"),
+            ("retained_audio_samples", "dataset_name", "TEXT"),
+            ("retained_audio_samples", "source_species", "TEXT"),
+            ("retained_audio_samples", "source_citation", "TEXT"),
+            ("retained_audio_samples", "source_url", "TEXT"),
+            ("retained_audio_samples", "transducer_type", "TEXT"),
+            ("retained_audio_samples", "source_category", "TEXT"),
         ]
         for table, col, col_def in migrations:
             try:

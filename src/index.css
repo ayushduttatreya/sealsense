@@ -1729,3 +1729,483 @@ body { margin: 0; overflow-x: hidden; }
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.3);
 }
+
+.ss-source-pill.public_reference {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.ss-source-pill.hardware_recording {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+/* ─── Acoustic Dataset Management & Evaluation Styles ──────────── */
+.ss-nav-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+  padding-bottom: 2px;
+}
+
+.ss-nav-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.ss-nav-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ss-nav-tab.active {
+  color: var(--accent-light);
+  border-bottom-color: var(--accent);
+  background: var(--bg-card);
+}
+
+.ss-label-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0.3px;
+}
+
+.ss-label-pill.label-TARGET_PEST_OBSERVED {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.ss-label-pill.label-NO_TARGET_PEST_OBSERVED {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.ss-label-pill.label-INCONCLUSIVE {
+  background: rgba(234, 179, 8, 0.15);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.ss-label-pill.label-UNREVIEWED {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.ss-label-pill.label-REVIEWED {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.ss-eval-container {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.ss-eval-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  margin-bottom: 16px;
+}
+
+.ss-eval-stat-box {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  text-align: center;
+}
+
+.ss-eval-stat-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent-light);
+  margin-bottom: 4px;
+}
+
+.ss-eval-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ss-matrix-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-width: 380px;
+}
+
+.ss-matrix-cell {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-matrix-cell.tp { border-left: 3px solid var(--green); }
+.ss-matrix-cell.tn { border-left: 3px solid var(--teal); }
+.ss-matrix-cell.fp { border-left: 3px solid var(--yellow); }
+.ss-matrix-cell.fn { border-left: 3px solid var(--red); }
+
+.ss-matrix-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ss-matrix-lbl {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  text-align: center;
+}
+
+.ss-sample-table-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.ss-sample-row {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 1fr 1.5fr 1.2fr 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  transition: background 0.15s ease;
+}
+
+.ss-sample-row:last-child {
+  border-bottom: none;
+}
+
+.ss-sample-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.ss-sample-row-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: rgba(15, 23, 42, 0.7);
+  border-bottom: 1px solid var(--border);
+}
+
+.ss-audio-player-mini audio {
+  height: 28px;
+  width: 170px;
+  filter: invert(0.85) hue-rotate(180deg);
+}
+
+.ss-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  backdrop-filter: blur(4px);
+  padding: 16px;
+}
+
+.ss-modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 540px;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+}
+
+.ss-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ss-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ss-form-group {
+  margin-bottom: 16px;
+}
+
+.ss-form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.ss-select {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.ss-select:focus {
+  border-color: var(--accent);
+}
+
+/* ─── 3-Way Input Selector & Demonstration Modes ───────────────── */
+.ss-demo-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+@media (max-width: 900px) {
+  .ss-demo-mode-selector {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ss-demo-mode-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  text-align: left;
+}
+
+.ss-demo-mode-card:hover:not(.disabled) {
+  border-color: var(--accent);
+  background: rgba(30, 41, 59, 0.7);
+  transform: translateY(-1px);
+}
+
+.ss-demo-mode-card.active {
+  border-color: var(--accent-light);
+  background: rgba(99, 102, 241, 0.08);
+  box-shadow: 0 0 0 1px var(--accent-light), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.ss-demo-mode-card.disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.ss-demo-mode-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.ss-demo-mode-icon-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.ss-demo-mode-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-bottom: 10px;
+  flex: 1;
+}
+
+.ss-demo-mode-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+}
+
+/* ─── Reference Catalog Grid & Cards ──────────────────────────── */
+.ss-ref-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.ss-ref-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.15s ease;
+}
+
+.ss-ref-card:hover {
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.ss-ref-card.selected {
+  border-color: #34d399;
+  background: rgba(16, 185, 129, 0.04);
+}
+
+.ss-ref-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ss-ref-species {
+  font-size: 15px;
+  font-weight: 700;
+  font-style: italic;
+  color: #34d399;
+}
+
+.ss-ref-common {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-style: normal;
+}
+
+.ss-ref-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  font-size: 11.5px;
+  background: rgba(0, 0, 0, 0.2);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+
+.ss-ref-detail-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.ss-ref-detail-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ss-ref-detail-val {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.ss-ref-citation-box {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: 8px;
+}
+
+/* ─── Synthetic Bioacoustic Impulse Controls ───────────────────── */
+.ss-sim-controls-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-top: 14px;
+}
+
+.ss-sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.ss-sim-param-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ss-sim-param-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.ss-sim-param-val {
+  font-family: 'JetBrains Mono', monospace;
+  color: #c084fc;
+  font-weight: 700;
+}
+
+.ss-sim-slider {
+  width: 100%;
+  accent-color: #a855f7;
+  cursor: pointer;
+}
+
+.ss-sim-param-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+

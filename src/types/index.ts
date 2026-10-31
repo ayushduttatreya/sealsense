@@ -101,13 +101,145 @@ export interface AcousticInferenceResult {
   limitations: string;
   error?: string | null;
   reason?: string | null;
-  input_source?: 'user_upload' | 'synthetic' | 'live_stream';
+  input_source?: 'user_upload' | 'synthetic' | 'live_stream' | 'public_reference' | 'hardware_recording';
   filename?: string | null;
   original_sample_rate?: number | null;
   original_channels?: number | null;
   original_duration_sec?: number | null;
   window_mode?: 'exact' | 'padded' | 'truncated' | null;
+  audio_sample_id?: string | null;
+  is_retained?: boolean;
+  dataset_name?: string | null;
+  source_species?: string | null;
+  source_citation?: string | null;
+  source_url?: string | null;
+  transducer_type?: string | null;
+  simulation_params?: Record<string, any> | null;
 }
+
+// ─── Retained Audio Dataset & Evaluation ──────────────────────────────────────
+export type GroundTruthLabel =
+  | 'UNREVIEWED'
+  | 'REVIEWED'
+  | 'TARGET_PEST_OBSERVED'
+  | 'NO_TARGET_PEST_OBSERVED'
+  | 'INCONCLUSIVE';
+
+export type VerificationMethod =
+  | 'physical_trap_inspection'
+  | 'grain_sieve'
+  | 'visual_sample'
+  | 'acoustic_expert_review'
+  | 'laboratory_reared_culture'
+  | 'unverified';
+
+export interface RetainedAudioSample {
+  id: string;
+  filename: string;
+  stored_filename: string;
+  file_size_bytes: number;
+  sha256_hash: string;
+  duration_sec: number;
+  sample_rate: number;
+  channels: number;
+  format: string;
+  timestamp: string;
+  recording_timestamp?: string | null;
+  zone_id: string;
+  device_id: string;
+  input_source: 'user_upload' | 'hardware_recording' | 'synthetic' | 'public_reference';
+  is_synthetic: boolean;
+  model_id?: string | null;
+  model_version?: string | null;
+  prediction?: string | null;
+  score?: number | null;
+  confidence_band?: string | null;
+  top_predictions: PredictionItem[];
+  waveform_preview?: number[] | null;
+  spectrogram_peaks?: { freq_hz?: number; db?: number }[] | null;
+  review_status: 'UNREVIEWED' | 'REVIEWED';
+  ground_truth_label: GroundTruthLabel;
+  verification_method: VerificationMethod;
+  reviewer?: string | null;
+  reviewed_at?: string | null;
+  evidence_notes?: string | null;
+  dataset_name?: string | null;
+  source_species?: string | null;
+  source_citation?: string | null;
+  source_url?: string | null;
+  transducer_type?: string | null;
+  source_category?: string | null;
+  created_at: string;
+}
+
+// ─── Public Reference Audio Schemas ──────────────────────────────────────────
+export interface ReferenceAudioCatalogItem {
+  id: string;
+  filename: string;
+  species: string;
+  common_name: string;
+  life_stage: string;
+  substrate: string;
+  transducer_type: string;
+  category: string;
+  description: string;
+  duration_sec: number;
+  sample_rate: number;
+  channels: number;
+  dataset_name: string;
+  citation: string;
+  source_url: string;
+  sha256_hash?: string | null;
+  is_locally_available: boolean;
+  file_size_bytes?: number | null;
+  notes: string;
+}
+
+export interface ReferenceImportRequest {
+  catalog_id: string;
+  retain_sample?: boolean;
+  zone_id?: string;
+  device_id?: string;
+  notes?: string | null;
+}
+
+// ─── Synthetic Bioacoustic Simulation Schemas ─────────────────────────────────
+export interface SyntheticImpulseRequest {
+  impulse_rate?: number;
+  amplitude?: number;
+  noise_level?: number;
+  duration_sec?: number;
+  seed?: number;
+  run_inference?: boolean;
+  retain_sample?: boolean;
+  zone_id?: string;
+  device_id?: string;
+}
+
+export interface DatasetEvaluationReport {
+  timestamp: string;
+  total_samples: number;
+  eligible_samples: number;
+  excluded_samples: number;
+  exclusion_breakdown: Record<string, number>;
+  label_distribution: Record<string, number>;
+  vocabulary_alignment: string;
+  anomaly_threshold: number;
+  anomaly_metrics?: {
+    true_positives: number;
+    false_positives: number;
+    true_negatives: number;
+    false_negatives: number;
+    precision: number | null;
+    recall: number | null;
+    specificity: number | null;
+    f1_score: number | null;
+  } | null;
+  grouped_by_zone: Record<string, any>;
+  provenance_breakdown?: Record<string, number>;
+  limitations_notice: string;
+}
+
 
 // ─── Alerts ───────────────────────────────────────────────────────────────────
 export type AlertSeverity = 'info' | 'warning' | 'critical';

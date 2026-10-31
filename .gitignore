@@ -58,6 +58,8 @@ models/
 *.mp3
 *.flac
 *.ogg
+data/
+backend/data/
 /tmp/
 
 # Editor directories and OS files
