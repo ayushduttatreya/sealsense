@@ -76,6 +76,12 @@ class AcousticInferenceResult(BaseModel):
     ] = "unknown"
     simulation_params: Optional[dict] = None
     signal_analysis: Optional[Dict[str, Any]] = None
+    # Domain-specific Grain Acoustic Baseline Model Output
+    domain_prediction: Optional[str] = None
+    domain_score: Optional[float] = None
+    domain_model_id: Optional[str] = "sealsense-rf-baseline-v1"
+    domain_probabilities: Optional[Dict[str, float]] = None
+    domain_confidence_band: Optional[Literal["low", "medium", "high", "uncertain"]] = None
 
 
 class ZeusInferenceResult(BaseModel):

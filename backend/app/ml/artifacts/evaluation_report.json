@@ -1,0 +1,390 @@
+{
+  "timestamp": "2026-10-31T16:25:37Z",
+  "duration_sec": 32.29,
+  "dataset_summary": {
+    "total_windows": 255,
+    "classes": [
+      "insect_activity",
+      "machinery_ventilation",
+      "grain_handling",
+      "background_noise"
+    ],
+    "class_distribution": {
+      "insect_activity": 192,
+      "machinery_ventilation": 19,
+      "grain_handling": 19,
+      "background_noise": 25
+    },
+    "domain_distribution": {
+      "accelerometer": 78,
+      "piezoelectric": 38,
+      "pvdf": 19,
+      "ultrasonic_transducer": 38,
+      "airborne_microphone": 82
+    },
+    "unique_sessions": 11,
+    "window_duration_sec": 1.0,
+    "sample_rate_hz": 16000
+  },
+  "models": {
+    "random_forest": {
+      "model_name": "Random Forest (Physical Features)",
+      "feature_count": 22,
+      "macro_precision": 0.1818,
+      "macro_recall": 0.2188,
+      "macro_f1": 0.1986,
+      "weighted_precision": 0.5476,
+      "weighted_recall": 0.6588,
+      "weighted_f1": 0.5981,
+      "per_class": {
+        "insect_activity": {
+          "precision": 0.7273,
+          "recall": 0.875,
+          "f1": 0.7943,
+          "support": 192
+        },
+        "machinery_ventilation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 19
+        },
+        "grain_handling": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 19
+        },
+        "background_noise": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 25
+        }
+      },
+      "confusion_matrix": [
+        [
+          168,
+          0,
+          19,
+          5
+        ],
+        [
+          19,
+          0,
+          0,
+          0
+        ],
+        [
+          19,
+          0,
+          0,
+          0
+        ],
+        [
+          25,
+          0,
+          0,
+          0
+        ]
+      ],
+      "classes": [
+        "insect_activity",
+        "machinery_ventilation",
+        "grain_handling",
+        "background_noise"
+      ],
+      "false_positives_insect": 63,
+      "false_alarm_rate_per_hour": 3600.0
+    },
+    "small_cnn": {
+      "model_name": "Small 2D CNN (Log-Mel Spectrograms)",
+      "parameters": 28164,
+      "input_shape": [
+        1,
+        64,
+        101
+      ],
+      "macro_precision": 0.1804,
+      "macro_recall": 0.1484,
+      "macro_f1": 0.1629,
+      "weighted_precision": 0.5433,
+      "weighted_recall": 0.4471,
+      "weighted_f1": 0.4905,
+      "per_class": {
+        "insect_activity": {
+          "precision": 0.7215,
+          "recall": 0.5938,
+          "f1": 0.6514,
+          "support": 192
+        },
+        "machinery_ventilation": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 19
+        },
+        "grain_handling": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 19
+        },
+        "background_noise": {
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "support": 25
+        }
+      },
+      "confusion_matrix": [
+        [
+          114,
+          0,
+          19,
+          59
+        ],
+        [
+          0,
+          0,
+          19,
+          0
+        ],
+        [
+          19,
+          0,
+          0,
+          0
+        ],
+        [
+          25,
+          0,
+          0,
+          0
+        ]
+      ],
+      "classes": [
+        "insect_activity",
+        "machinery_ventilation",
+        "grain_handling",
+        "background_noise"
+      ],
+      "false_positives_insect": 44,
+      "false_alarm_rate_per_hour": 2514.29
+    }
+  },
+  "nocturne_mini_comparison": {
+    "status": "EVALUATED",
+    "sample_count": 25,
+    "vocabulary_size": 2182,
+    "vocabulary_domain": "Outdoor biodiversity (iNat-Sounds-2024 / InsectSet459: Orthoptera, wolves, crickets)",
+    "stored_grain_pest_in_vocab": false,
+    "top_frequent_predictions": [
+      [
+        "Geocrinia laevis",
+        4
+      ],
+      [
+        "Kassina senegalensis",
+        3
+      ],
+      [
+        "Cercopithecus mitis",
+        2
+      ],
+      [
+        "Rana arvalis",
+        2
+      ],
+      [
+        "Crinia signifera",
+        2
+      ]
+    ],
+    "sample_comparisons": [
+      {
+        "source_file": "accelrw.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "accelerometer",
+        "nocturne_top_prediction": "Kassina senegalensis",
+        "nocturne_score": 0.0394,
+        "nocturne_top_3": [
+          {
+            "label": "Kassina senegalensis",
+            "score": 0.03938
+          },
+          {
+            "label": "Poecilimon_tessellatus",
+            "score": 0.02333
+          },
+          {
+            "label": "Popplepsalta notialis",
+            "score": 0.02291
+          }
+        ]
+      },
+      {
+        "source_file": "accelrw.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "accelerometer",
+        "nocturne_top_prediction": "Barbitistes_yersini",
+        "nocturne_score": 0.0209,
+        "nocturne_top_3": [
+          {
+            "label": "Barbitistes_yersini",
+            "score": 0.02095
+          },
+          {
+            "label": "Pholidoptera_femorata",
+            "score": 0.01936
+          },
+          {
+            "label": "Poecilimon_tessellatus",
+            "score": 0.01712
+          }
+        ]
+      },
+      {
+        "source_file": "piezorw1.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "piezoelectric",
+        "nocturne_top_prediction": "Kassina senegalensis",
+        "nocturne_score": 0.0383,
+        "nocturne_top_3": [
+          {
+            "label": "Kassina senegalensis",
+            "score": 0.03827
+          },
+          {
+            "label": "Barbitistes_yersini",
+            "score": 0.0197
+          },
+          {
+            "label": "Pholidoptera_littoralis",
+            "score": 0.01353
+          }
+        ]
+      },
+      {
+        "source_file": "piezorw1.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "piezoelectric",
+        "nocturne_top_prediction": "Kassina senegalensis",
+        "nocturne_score": 0.0603,
+        "nocturne_top_3": [
+          {
+            "label": "Kassina senegalensis",
+            "score": 0.0603
+          },
+          {
+            "label": "Psophus_stridulus",
+            "score": 0.04361
+          },
+          {
+            "label": "Pholidoptera_littoralis",
+            "score": 0.02982
+          }
+        ]
+      },
+      {
+        "source_file": "pvdfrw1.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "pvdf",
+        "nocturne_top_prediction": "Poecilimon_tessellatus",
+        "nocturne_score": 0.0424,
+        "nocturne_top_3": [
+          {
+            "label": "Poecilimon_tessellatus",
+            "score": 0.04238
+          },
+          {
+            "label": "Poecilimon_thoracicus",
+            "score": 0.0374
+          },
+          {
+            "label": "Pholidoptera_femorata",
+            "score": 0.03729
+          }
+        ]
+      },
+      {
+        "source_file": "pvdfrw1.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "pvdf",
+        "nocturne_top_prediction": "Pholidoptera_femorata",
+        "nocturne_score": 0.0347,
+        "nocturne_top_3": [
+          {
+            "label": "Pholidoptera_femorata",
+            "score": 0.03471
+          },
+          {
+            "label": "Poecilimon_tessellatus",
+            "score": 0.02408
+          },
+          {
+            "label": "Barbitistes_yersini",
+            "score": 0.02218
+          }
+        ]
+      },
+      {
+        "source_file": "w30khzrw1.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "ultrasonic_transducer",
+        "nocturne_top_prediction": "Geocrinia laevis",
+        "nocturne_score": 0.0171,
+        "nocturne_top_3": [
+          {
+            "label": "Geocrinia laevis",
+            "score": 0.01706
+          },
+          {
+            "label": "Poecilimon_affinis",
+            "score": 0.01706
+          },
+          {
+            "label": "Crinia signifera",
+            "score": 0.017
+          }
+        ]
+      },
+      {
+        "source_file": "w30khzrw1.wav",
+        "true_ground_truth": "insect_activity",
+        "species": "Sitophilus oryzae",
+        "domain": "ultrasonic_transducer",
+        "nocturne_top_prediction": "Poecilimon_affinis",
+        "nocturne_score": 0.0251,
+        "nocturne_top_3": [
+          {
+            "label": "Poecilimon_affinis",
+            "score": 0.02509
+          },
+          {
+            "label": "Geocrinia laevis",
+            "score": 0.01891
+          },
+          {
+            "label": "Poecilimon_tessellatus",
+            "score": 0.01841
+          }
+        ]
+      }
+    ],
+    "conclusion": "Nocturne Mini outputs generic outdoor biodiversity taxa (e.g. Canis lupus, crickets) and does not recognize stored grain internal pests (Sitophilus oryzae, Plodia interpunctella). Domain-specific physical acoustic models are required for accurate grain silo monitoring."
+  },
+  "best_model": "Random Forest",
+  "scientific_disclaimer": "Machine learning baseline metrics for experimental stored-grain acoustic monitoring. Evaluated using strict Session-GroupKFold to prevent time-series autocorrelation leakage. Microphone recordings reflect physical INMP441 breadboard captures; reference recordings reflect USDA Bug Bytes cultures. Do NOT treat generic bioacoustic classifications as validated quarantine pest detection without physical grain inspection.",
+  "saved_artifacts": {
+    "rf_model": "/home/ayush/Projects/sealsense/backend/app/ml/artifacts/rf_baseline.joblib",
+    "cnn_model": "/home/ayush/Projects/sealsense/backend/app/ml/artifacts/cnn_baseline.pt"
+  }
+}

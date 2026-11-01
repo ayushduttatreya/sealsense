@@ -259,7 +259,8 @@ export type ObservabilityTimeRange = '5m' | '15m' | '1h' | '6h' | '24h' | 'all';
 export function useObservabilityData(
   zoneId: string,
   deviceId: string,
-  initialTimeRange: ObservabilityTimeRange = '15m'
+  initialTimeRange: ObservabilityTimeRange = '15m',
+  sourceFilter: string = 'all'
 ) {
   const backendOnline = useBackendHealth();
   const [timeRange, setTimeRange] = useState<ObservabilityTimeRange>(initialTimeRange);
@@ -275,6 +276,7 @@ export function useObservabilityData(
       const qParams = new URLSearchParams();
       if (zoneId && zoneId !== 'all') qParams.set('zone_id', zoneId);
       if (deviceId && deviceId !== 'all') qParams.set('device_id', deviceId);
+      if (sourceFilter && sourceFilter !== 'all') qParams.set('source', sourceFilter);
 
       const latestPath = `/api/telemetry/latest?${qParams.toString()}`;
       qParams.set('time_range', timeRange);
@@ -287,14 +289,12 @@ export function useObservabilityData(
       ]);
 
       if (latData) setLatest(latData);
-      if (histData && histData.readings) {
-        setHistory(histData.readings);
-      }
+      setHistory(histData?.readings ?? []);
       setLastFetched(new Date());
     } finally {
       setLoading(false);
     }
-  }, [zoneId, deviceId, timeRange]);
+  }, [zoneId, deviceId, timeRange, sourceFilter]);
 
   useEffect(() => {
     void fetchTelemetry();

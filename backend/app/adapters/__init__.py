@@ -14,6 +14,7 @@ from .base import (
 )
 from .nocturne import NocturneMiniAdapter
 from .zeus import ZeusAdapter
+from .baseline import GrainAcousticBaselineAdapter
 
 __all__ = [
     "ModelStatus",
@@ -23,4 +24,5 @@ __all__ = [
     "PredictionItem",
     "NocturneMiniAdapter",
     "ZeusAdapter",
+    "GrainAcousticBaselineAdapter",
 ]

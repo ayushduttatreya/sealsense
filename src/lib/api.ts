@@ -140,6 +140,8 @@ export const api = {
     `${BASE}/api/dataset/manifest?format=${format}&include_synthetic=${include_synthetic}`,
   datasetEvaluation: (threshold = 0.05) =>
     request<import('../types').DatasetEvaluationReport>(`/api/dataset/evaluation?threshold=${threshold}`),
+  acousticBenchmarks: () =>
+    request<any>('/api/inference/acoustic/benchmark'),
   seedDemoAudioSamples: () =>
     request<{ seeded: number; message: string }>('/api/audio-samples/seed-demo', {
       method: 'POST',

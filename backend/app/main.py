@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from .database import init_db, get_db, CREATE_SAMPLES
 from .models import (
-    EnvironmentalReading, AcousticEvent, Alert, Device, Zone,
+    EnvironmentalReading, AcousticEvent, Alert, Device, Zone, SensorInventory,
     TelemetryPayload, AcknowledgeRequest, ClearAlertRequest,
     ValidateEventRequest, ScenarioRequest,
     TraceStep, ExecutionTrace, BatchReviewRequest,
@@ -83,11 +83,84 @@ async def health():
 @app.get("/api/devices", response_model=list[Device])
 async def list_devices():
     """
-    Returns device inventory with dynamic ThingsBoard-style inactivity checks.
+    Returns device inventory distinguishing REAL hardware and SIMULATED demo nodes.
+    Computes connectivity dynamically from the timestamp of the latest genuine hardware reading.
     """
     now = datetime.now(timezone.utc)
     evaluated_devices = []
 
+    # 1. Query real hardware telemetry to dynamically evaluate genuine hardware nodes
+    hw_rows = []
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                """SELECT device_id, zone_id, MAX(timestamp) as last_seen,
+                          firmware_version, transport,
+                          COUNT(*) as packet_count
+                   FROM environmental_readings
+                   WHERE source = 'REAL'
+                   GROUP BY LOWER(device_id)"""
+            ) as cur:
+                hw_rows = await cur.fetchall()
+    except Exception as e:
+        log.warning(f"Error querying real devices: {e}")
+
+    hw_dev_ids = set()
+    for row in hw_rows:
+        dev_id = row["device_id"]
+        hw_dev_ids.add(dev_id.lower())
+        zone_id = row["zone_id"] or "zone-a"
+        last_seen_str = row["last_seen"]
+        firmware = row["firmware_version"] or "2.0.0-PROTOTYPE"
+
+        try:
+            ls_time = datetime.fromisoformat(last_seen_str.replace("Z", "+00:00"))
+            diff_sec = (now - ls_time).total_seconds()
+        except Exception:
+            diff_sec = 999999.0
+
+        is_connected = diff_sec < 60   # Heartbeat valid within 60s
+        is_active = diff_sec < 15      # Active live streaming within 15s
+
+        sensors = [
+            SensorInventory(type="SCD41", status="ok" if is_connected else "error", last_reading=last_seen_str),
+            SensorInventory(type="INMP441", status="ok" if is_connected else "unavailable", last_reading=last_seen_str),
+            SensorInventory(type="BUZZER", status="ok"),
+        ]
+
+        evaluated_devices.append(Device(
+            id=dev_id,
+            name=f"ESP32 Hardware Node ({dev_id})",
+            zone_id=zone_id,
+            firmware_version=firmware,
+            last_seen=last_seen_str,
+            connected=is_connected,
+            inactivity_timeout_sec=60,
+            last_activity_time=last_seen_str,
+            is_active=is_active,
+            sensors=sensors,
+        ))
+
+    # Ensure physical esp32-zone-a-01 is always registered even if DB is fresh
+    if "esp32-zone-a-01" not in hw_dev_ids:
+        evaluated_devices.append(Device(
+            id="esp32-zone-a-01",
+            name="ESP32 Hardware Node (esp32-zone-a-01)",
+            zone_id="zone-a",
+            firmware_version="2.0.0-PROTOTYPE",
+            last_seen="1970-01-01T00:00:00+00:00",
+            connected=False,
+            inactivity_timeout_sec=60,
+            last_activity_time=None,
+            is_active=False,
+            sensors=[
+                SensorInventory(type="SCD41", status="not_connected"),
+                SensorInventory(type="INMP441", status="not_connected"),
+                SensorInventory(type="BUZZER", status="ok"),
+            ],
+        ))
+
+    # 2. Add simulated demo devices from DEMO_DEVICES (demo-esp32-zone-*)
     for d in DEMO_DEVICES:
         dev_copy = d.model_copy()
         try:
@@ -106,7 +179,13 @@ async def list_devices():
 @app.get("/api/zones", response_model=list[Zone])
 async def list_zones():
     _, _, _, zones = get_demo_data(_current_scenario)
-    return zones
+    out_zones = []
+    for z in zones:
+        z_copy = z.model_copy()
+        if z.id == "zone-a":
+            z_copy.device_ids = ["esp32-zone-a-01", "demo-esp32-zone-a-01"]
+        out_zones.append(z_copy)
+    return out_zones
 
 
 # ─── Environmental Readings ────────────────────────────────────────
@@ -404,17 +483,31 @@ async def ingest_telemetry(payload: TelemetryPayload):
 async def get_latest_telemetry(
     device_id: Optional[str] = None,
     zone_id: Optional[str] = None,
+    source: Optional[str] = None,
 ):
-    """Returns the most recent telemetry packet from real hardware or simulated demo."""
+    """
+    Returns the most recent telemetry packet.
+    Strictly preserves device identity: physical devices (e.g. esp32-zone-a-01)
+    NEVER fall back to simulated data, and calculate status strictly from genuine hardware packets.
+    """
     query = "SELECT * FROM environmental_readings"
     params = []
     conds = []
-    if device_id:
-        conds.append("device_id = ?")
-        params.append(device_id)
-    if zone_id:
-        conds.append("zone_id = ?")
-        params.append(zone_id)
+
+    norm_dev = device_id.strip() if device_id and device_id != "all" else None
+    norm_zone = zone_id.strip() if zone_id and zone_id != "all" else None
+    norm_source = source.strip().upper() if source and source != "all" else None
+
+    if norm_dev:
+        conds.append("LOWER(device_id) = LOWER(?)")
+        params.append(norm_dev)
+    if norm_zone:
+        conds.append("LOWER(zone_id) = LOWER(?)")
+        params.append(norm_zone)
+    if norm_source:
+        conds.append("LOWER(source) = LOWER(?)")
+        params.append(norm_source)
+
     if conds:
         query += " WHERE " + " AND ".join(conds)
     query += " ORDER BY timestamp DESC LIMIT 1"
@@ -442,10 +535,29 @@ async def get_latest_telemetry(
             device_status=status_str,
         )
 
-    # Fallback to latest demo reading
+    # If the user specifically queried a real hardware device or requested source=REAL,
+    # NEVER replace genuine hardware view with simulated readings!
+    is_real_device_query = (
+        (norm_dev and not norm_dev.lower().startswith("demo-"))
+        or norm_source == "REAL"
+    )
+    if is_real_device_query:
+        return LatestTelemetryResponse(
+            reading=None,
+            is_hardware=True,
+            source="REAL",
+            transport=None,
+            age_seconds=None,
+            device_status="disconnected",
+        )
+
+    # Fallback to demo reading ONLY for demo devices or unconstrained simulation preview
     demo_readings, _, _, _ = get_demo_data(_current_scenario)
-    if zone_id:
-        demo_readings = [r for r in demo_readings if r.zone_id == zone_id]
+    if norm_zone:
+        demo_readings = [r for r in demo_readings if r.zone_id.lower() == norm_zone.lower()]
+    if norm_dev:
+        demo_readings = [r for r in demo_readings if r.device_id.lower() == norm_dev.lower()]
+
     if demo_readings:
         latest_demo = demo_readings[-1]
         return LatestTelemetryResponse(
@@ -471,11 +583,13 @@ async def get_latest_telemetry(
 async def get_telemetry_history(
     device_id: Optional[str] = None,
     zone_id: Optional[str] = None,
+    source: Optional[str] = None,
     time_range: str = Query("15m", description="Time range: 5m, 15m, 1h, 6h, 24h, all"),
     limit: int = Query(300, description="Max readings to return"),
 ):
     """
     Returns time-filtered, chronological telemetry readings for high-density Grafana time-series graphs.
+    Supports strict source isolation so simulated demo data and real hardware data are never mixed.
     """
     now = datetime.now(timezone.utc)
     delta_map = {
@@ -490,6 +604,10 @@ async def get_telemetry_history(
     if time_range in delta_map:
         start_iso = (now - delta_map[time_range]).isoformat()
 
+    norm_dev = device_id.strip() if device_id and device_id != "all" else None
+    norm_zone = zone_id.strip() if zone_id and zone_id != "all" else None
+    norm_source = source.strip().upper() if source and source != "all" else None
+
     query = "SELECT * FROM environmental_readings"
     params = []
     conds = []
@@ -497,12 +615,15 @@ async def get_telemetry_history(
     if start_iso:
         conds.append("timestamp >= ?")
         params.append(start_iso)
-    if device_id:
-        conds.append("device_id = ?")
-        params.append(device_id)
-    if zone_id:
-        conds.append("zone_id = ?")
-        params.append(zone_id)
+    if norm_dev:
+        conds.append("LOWER(device_id) = LOWER(?)")
+        params.append(norm_dev)
+    if norm_zone:
+        conds.append("LOWER(zone_id) = LOWER(?)")
+        params.append(norm_zone)
+    if norm_source:
+        conds.append("LOWER(source) = LOWER(?)")
+        params.append(norm_source)
 
     if conds:
         query += " WHERE " + " AND ".join(conds)
@@ -516,7 +637,7 @@ async def get_telemetry_history(
 
     if rows and len(rows) > 0:
         readings = [EnvironmentalReading(**dict(r)) for r in rows]
-        is_hw = any(r.source == "REAL" for r in readings)
+        is_hw = all(r.source == "REAL" for r in readings) if norm_source == "REAL" else any(r.source == "REAL" for r in readings)
         return TelemetryHistoryResponse(
             readings=readings,
             count=len(readings),
@@ -527,20 +648,38 @@ async def get_telemetry_history(
             is_hardware=is_hw,
         )
 
-    # Fall back smoothly to demo readings for that time window
+    # If the user queried real hardware, NEVER inject simulated data into real history
+    is_real_device_query = (
+        (norm_dev and not norm_dev.lower().startswith("demo-"))
+        or norm_source == "REAL"
+    )
+    if is_real_device_query:
+        return TelemetryHistoryResponse(
+            readings=[],
+            count=0,
+            device_id=device_id,
+            zone_id=zone_id,
+            time_range=time_range,
+            source="REAL",
+            is_hardware=True,
+        )
+
+    # Fall back smoothly to demo readings ONLY for simulated requests
     demo_readings, _, _, _ = get_demo_data(_current_scenario)
-    if zone_id:
-        demo_readings = [r for r in demo_readings if r.zone_id == zone_id]
+    if norm_zone:
+        demo_readings = [r for r in demo_readings if r.zone_id.lower() == norm_zone.lower()]
+    if norm_dev:
+        demo_readings = [r for r in demo_readings if r.device_id.lower() == norm_dev.lower()]
     if start_iso:
         demo_readings = [r for r in demo_readings if r.timestamp >= start_iso]
 
-    # If demo readings are too sparse for 5m/15m, generate an interpolated dense series
+    # If demo readings are too sparse for 5m/15m, generate an interpolated dense series under demo ID
     if len(demo_readings) < 5 and time_range in ("5m", "15m"):
         base_reading = demo_readings[-1] if demo_readings else None
         base_co2 = base_reading.co2_ppm if base_reading and base_reading.co2_ppm else 1826.0
         base_temp = base_reading.temperature_c if base_reading and base_reading.temperature_c else 25.4
         base_rh = base_reading.relative_humidity_pct if base_reading and base_reading.relative_humidity_pct else 68.1
-        
+
         step_sec = 10 if time_range == "5m" else 30
         points = 30
         sim_readings = []
@@ -549,8 +688,8 @@ async def get_telemetry_history(
             sim_readings.append(EnvironmentalReading(
                 id=f"sim-hist-{i}",
                 timestamp=t.isoformat(),
-                zone_id=zone_id or "zone-a",
-                device_id=device_id or "esp32-zone-a-01",
+                zone_id=norm_zone or "zone-a",
+                device_id="demo-esp32-zone-a-01",
                 source="SIMULATED",
                 co2_ppm=round(base_co2 + (i % 5 - 2) * 3.5, 1),
                 temperature_c=round(base_temp + (i % 3 - 1) * 0.1, 1),
@@ -564,7 +703,7 @@ async def get_telemetry_history(
                 audio_peak_dbfs=round(-30.0 + (i % 3 - 1) * 1.2, 1),
                 audio_valid=True,
                 transport="demo_generator",
-                firmware_version="2.0.0-PROTOTYPE",
+                firmware_version="2.0.0-SIM",
             ))
         return TelemetryHistoryResponse(
             readings=sim_readings,
@@ -954,7 +1093,7 @@ async def get_aggregated_readings(
 
 
 # ─── Isolated Machine Learning Adapters Status & Inference ────────
-from .adapters import NocturneMiniAdapter, ZeusAdapter, AcousticInferenceResult
+from .adapters import NocturneMiniAdapter, ZeusAdapter, AcousticInferenceResult, GrainAcousticBaselineAdapter
 
 
 class AcousticInferenceRequest(BaseModel):
@@ -973,17 +1112,31 @@ async def get_models_status():
     return {
         "nocturne": NocturneMiniAdapter.check_dependencies().model_dump(),
         "zeus": ZeusAdapter.check_dependencies().model_dump(),
+        "baseline_rf": {"status": "READY", "model_id": "sealsense-rf-baseline-v1"},
+        "baseline_cnn": {"status": "READY", "model_id": "sealsense-cnn-baseline-v1"},
         "rule_engine_active": True,
         "active_scenario": _current_scenario,
     }
 
 
+@app.get("/api/inference/acoustic/benchmark")
+async def get_acoustic_benchmark():
+    """
+    Returns reproducible evaluation metrics across Random Forest, Small CNN,
+    and Nocturne Mini comparison with GroupKFold session isolation.
+    """
+    bench_path = os.path.join(os.path.dirname(__file__), "ml", "artifacts", "evaluation_report.json")
+    if os.path.isfile(bench_path):
+        with open(bench_path, "r") as fp:
+            return json.load(fp)
+    return {"status": "UNAVAILABLE", "error": "Benchmark report not generated yet"}
+
+
 @app.post("/api/inference/acoustic", response_model=AcousticInferenceResult)
 async def run_acoustic_inference(req: AcousticInferenceRequest):
     """
-    Executes lazy bioacoustic inference using NocturneMiniAdapter.
-    If dependencies or weights are unavailable, returns explicit UNAVAILABLE
-    status while extracting physical audio waveform metrics.
+    Executes lazy bioacoustic inference using NocturneMiniAdapter and domain-specific
+    stored-grain baseline models (Random Forest on physical features).
     """
     adapter = NocturneMiniAdapter()
     res = adapter.predict(req.audio_samples, sample_rate=req.sample_rate)
@@ -992,6 +1145,19 @@ async def run_acoustic_inference(req: AcousticInferenceRequest):
         res.signal_analysis = analyze_signal(np.array(req.audio_samples, dtype=np.float32), sample_rate=req.sample_rate)
     except Exception as e:
         log.warning("Could not calculate signal analysis for raw array: %s", e)
+
+    # Execute domain-specific stored-grain baseline model
+    try:
+        baseline_adapter = GrainAcousticBaselineAdapter()
+        base_res = baseline_adapter.predict(req.audio_samples, sample_rate=req.sample_rate)
+        res.domain_prediction = base_res.get("prediction")
+        res.domain_score = base_res.get("score")
+        res.domain_model_id = base_res.get("model_id")
+        res.domain_probabilities = base_res.get("class_probabilities")
+        res.domain_confidence_band = base_res.get("confidence_band")
+    except Exception as e:
+        log.warning("Could not execute baseline model inference: %s", e)
+
     res.recording_domain = "airborne_microphone"
     return res
 
@@ -1117,6 +1283,18 @@ async def upload_acoustic_recording(
 
     result.recording_domain = domain_val
     result.signal_analysis = sig_analysis
+
+    # Execute domain-specific stored-grain baseline model
+    try:
+        baseline_adapter = GrainAcousticBaselineAdapter()
+        base_res = baseline_adapter.predict_wav_bytes(contents)
+        result.domain_prediction = base_res.get("prediction")
+        result.domain_score = base_res.get("score")
+        result.domain_model_id = base_res.get("model_id")
+        result.domain_probabilities = base_res.get("class_probabilities")
+        result.domain_confidence_band = base_res.get("confidence_band")
+    except Exception as e:
+        log.warning("Could not execute baseline model inference on upload: %s", e)
 
     if result.status == "ERROR":
         raise HTTPException(
@@ -1567,6 +1745,18 @@ async def import_reference_sample(req: ReferenceImportRequest):
         log.warning("Could not compute signal analysis for reference sample: %s", sig_err)
         sig_analysis = None
     result.signal_analysis = sig_analysis
+
+    # Execute domain-specific stored-grain baseline model
+    try:
+        baseline_adapter = GrainAcousticBaselineAdapter()
+        base_res = baseline_adapter.predict_wav_bytes(wav_bytes)
+        result.domain_prediction = base_res.get("prediction")
+        result.domain_score = base_res.get("score")
+        result.domain_model_id = base_res.get("model_id")
+        result.domain_probabilities = base_res.get("class_probabilities")
+        result.domain_confidence_band = base_res.get("confidence_band")
+    except Exception as base_err:
+        log.warning("Could not execute baseline model inference for reference sample: %s", base_err)
 
     sample_id = None
     if req.retain_sample:

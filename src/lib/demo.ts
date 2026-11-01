@@ -43,10 +43,10 @@ export const SCENARIOS: ScenarioInfo[] = [
 // Static simulated devices and zones (not scenario-dependent)
 export const DEMO_DEVICES: Device[] = [
   {
-    id: 'esp32-zone-a-01',
-    name: 'Zone A Node 1',
+    id: 'demo-esp32-zone-a-01',
+    name: 'Demo Zone A Node 1 (Simulated)',
     zone_id: 'zone-a',
-    firmware_version: '1.2.0',
+    firmware_version: '1.2.0-SIM',
     last_seen: TS(1),
     connected: true,
     inactivity_timeout_sec: 300,
@@ -59,10 +59,10 @@ export const DEMO_DEVICES: Device[] = [
     ],
   },
   {
-    id: 'esp32-zone-b-01',
-    name: 'Zone B Node 1',
+    id: 'demo-esp32-zone-b-01',
+    name: 'Demo Zone B Node 1 (Simulated)',
     zone_id: 'zone-b',
-    firmware_version: '1.2.0',
+    firmware_version: '1.2.0-SIM',
     last_seen: TS(3),
     connected: true,
     inactivity_timeout_sec: 300,
@@ -75,10 +75,10 @@ export const DEMO_DEVICES: Device[] = [
     ],
   },
   {
-    id: 'esp32-zone-c-01',
-    name: 'Zone C Node 1',
+    id: 'demo-esp32-zone-c-01',
+    name: 'Demo Zone C Node 1 (Offline Demo)',
     zone_id: 'zone-c',
-    firmware_version: '1.1.3',
+    firmware_version: '1.1.3-SIM',
     last_seen: TS(45),
     connected: false,
     inactivity_timeout_sec: 300,
@@ -93,9 +93,9 @@ export const DEMO_DEVICES: Device[] = [
 ];
 
 export const DEMO_ZONES: Zone[] = [
-  { id: 'zone-a', name: 'Zone A — Silo 1', description: 'Primary wheat storage', device_ids: ['esp32-zone-a-01'], health: 'healthy' },
-  { id: 'zone-b', name: 'Zone B — Silo 2', description: 'Barley storage', device_ids: ['esp32-zone-b-01'], health: 'healthy' },
-  { id: 'zone-c', name: 'Zone C — Silo 3', description: 'Corn storage (offline)', device_ids: ['esp32-zone-c-01'], health: 'unknown' },
+  { id: 'zone-a', name: 'Zone A — Silo 1', description: 'Primary wheat storage', device_ids: ['demo-esp32-zone-a-01'], health: 'healthy' },
+  { id: 'zone-b', name: 'Zone B — Silo 2', description: 'Barley storage', device_ids: ['demo-esp32-zone-b-01'], health: 'healthy' },
+  { id: 'zone-c', name: 'Zone C — Silo 3', description: 'Corn storage (offline)', device_ids: ['demo-esp32-zone-c-01'], health: 'unknown' },
 ];
 
 function makeReading(
@@ -106,7 +106,7 @@ function makeReading(
     id: `r-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     timestamp: TS(offsetMin),
     zone_id: 'zone-a',
-    device_id: 'esp32-zone-a-01',
+    device_id: 'demo-esp32-zone-a-01',
     source: 'SIMULATED',
     co2_ppm: 420,
     temperature_c: 18.5,
@@ -139,7 +139,7 @@ function risingReadings(): EnvironmentalReading[] {
 function combinedReadings(): EnvironmentalReading[] {
   return Array.from({ length: 24 }, (_, i) => makeReading({
     zone_id: 'zone-b',
-    device_id: 'esp32-zone-b-01',
+    device_id: 'demo-esp32-zone-b-01',
     offsetMin: (23 - i) * 15,
     co2_ppm: 600 + i * 25,
     temperature_c: +(22.0 + i * 0.2).toFixed(1),
@@ -163,7 +163,7 @@ function acousticEvent(
     id: `ae-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     timestamp: NOW(),
     zone_id: 'zone-a',
-    device_id: 'esp32-zone-a-01',
+    device_id: 'demo-esp32-zone-a-01',
     source: 'MODEL_EXPERIMENT',
     audio_sample_ref: 'sample-wheat-ambient-001.wav',
     prediction: 'uncertain',
@@ -205,7 +205,7 @@ export function getDemoData(scenario: DemoScenario): {
             id: 'alrt-001',
             timestamp: TS(5),
             zone_id: 'zone-a',
-            device_id: 'esp32-zone-a-01',
+            device_id: 'demo-esp32-zone-a-01',
             severity: 'warning',
             category: 'environmental',
             title: 'CO₂ Trending Up — Zone A',
@@ -267,7 +267,7 @@ export function getDemoData(scenario: DemoScenario): {
         events: [
           acousticEvent({
             zone_id: 'zone-b',
-            device_id: 'esp32-zone-b-01',
+            device_id: 'demo-esp32-zone-b-01',
             inference_status: 'experimental',
             prediction: 'uncertain — elevated_activity',
             score: 0.55,
@@ -289,7 +289,7 @@ export function getDemoData(scenario: DemoScenario): {
             id: 'alrt-003',
             timestamp: TS(2),
             zone_id: 'zone-b',
-            device_id: 'esp32-zone-b-01',
+            device_id: 'demo-esp32-zone-b-01',
             severity: 'critical',
             category: 'combined',
             title: '🔴 Combined Risk — Zone B — Inspect Required',

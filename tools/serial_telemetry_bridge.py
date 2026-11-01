@@ -467,12 +467,12 @@ def run_mock(url: str, interval: float = 3.0):
             peak_lsb = int((10 ** (peak_dbfs / 20.0)) * 8388608.0)
 
             payload = {
-                "device_id": "esp32-zone-a-01",
+                "device_id": "demo-esp32-zone-a-01",
                 "zone_id": "zone-a",
-                "firmware_version": "2.0.0-PROTOTYPE",
+                "firmware_version": "2.0.0-MOCK",
                 "timestamp": now_iso,
-                "transport": "usb_serial",
-                "source": "REAL",
+                "transport": "mock_generator",
+                "source": "SIMULATED",
                 "co2_ppm": co2,
                 "temperature_c": temp,
                 "relative_humidity_pct": rh,

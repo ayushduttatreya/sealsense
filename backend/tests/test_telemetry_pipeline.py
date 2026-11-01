@@ -77,9 +77,92 @@ class TestTelemetryPipeline(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(data["time_range"], tr)
 
     async def test_device_inventory_updates_from_telemetry(self):
+        now_iso = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "device_id": "esp32-zone-a-01",
+            "zone_id": "zone-a",
+            "timestamp": now_iso,
+            "co2_ppm": 1827.0,
+            "temperature_c": 25.4,
+            "relative_humidity_pct": 68.1,
+            "transport": "usb_serial",
+            "source": "REAL",
+        }
+        post_resp = self.client.post("/api/telemetry", json=payload)
+        self.assertEqual(post_resp.status_code, 200)
+
         resp = self.client.get("/api/devices")
         self.assertEqual(resp.status_code, 200)
         devices = resp.json()
         node_a = next((d for d in devices if d["id"] == "esp32-zone-a-01"), None)
         self.assertIsNotNone(node_a)
         self.assertTrue(node_a["connected"])
+        self.assertTrue(node_a["is_active"])
+
+    async def test_real_vs_simulated_isolation(self):
+        # 1. Querying real hardware device ID must return REAL data with is_hardware=True
+        resp_real = self.client.get("/api/telemetry/latest?device_id=ESP32-ZONE-A-01")
+        self.assertEqual(resp_real.status_code, 200)
+        data_real = resp_real.json()
+        self.assertEqual(data_real["source"], "REAL")
+        self.assertTrue(data_real["is_hardware"])
+        self.assertEqual(data_real["transport"], "usb_serial")
+        self.assertIsNotNone(data_real["reading"])
+        self.assertEqual(data_real["reading"]["device_id"], "esp32-zone-a-01")
+
+        # 2. Querying demo device must return SIMULATED data under demo ID
+        resp_demo = self.client.get("/api/telemetry/latest?device_id=demo-esp32-zone-a-01")
+        self.assertEqual(resp_demo.status_code, 200)
+        data_demo = resp_demo.json()
+        self.assertEqual(data_demo["source"], "SIMULATED")
+        self.assertFalse(data_demo["is_hardware"])
+        self.assertEqual(data_demo["reading"]["device_id"], "demo-esp32-zone-a-01")
+
+        # 3. Querying a non-existent physical device must NEVER return simulated readings
+        resp_nonexistent = self.client.get("/api/telemetry/latest?device_id=esp32-zone-z-99")
+        self.assertEqual(resp_nonexistent.status_code, 200)
+        data_nonexistent = resp_nonexistent.json()
+        self.assertIsNone(data_nonexistent["reading"])
+        self.assertTrue(data_nonexistent["is_hardware"])
+        self.assertEqual(data_nonexistent["device_status"], "disconnected")
+
+    async def test_device_status_calculation_and_stale_detection(self):
+        # Post a stale reading (30 seconds ago -> between 15s and 60s)
+        stale_ts = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+        payload = {
+            "device_id": "esp32-zone-stale-01",
+            "zone_id": "zone-a",
+            "timestamp": stale_ts,
+            "co2_ppm": 800.0,
+            "temperature_c": 22.0,
+            "relative_humidity_pct": 50.0,
+            "transport": "usb_serial",
+            "source": "REAL",
+        }
+        self.client.post("/api/telemetry", json=payload)
+
+        resp = self.client.get("/api/telemetry/latest?device_id=esp32-zone-stale-01")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["device_status"], "stale")
+        self.assertTrue(data["is_hardware"])
+
+        # Post an expired reading (>60 seconds ago)
+        expired_ts = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
+        payload_exp = {
+            "device_id": "esp32-zone-expired-01",
+            "zone_id": "zone-a",
+            "timestamp": expired_ts,
+            "co2_ppm": 800.0,
+            "temperature_c": 22.0,
+            "relative_humidity_pct": 50.0,
+            "transport": "usb_serial",
+            "source": "REAL",
+        }
+        self.client.post("/api/telemetry", json=payload_exp)
+
+        resp_exp = self.client.get("/api/telemetry/latest?device_id=esp32-zone-expired-01")
+        self.assertEqual(resp_exp.status_code, 200)
+        data_exp = resp_exp.json()
+        self.assertEqual(data_exp["device_status"], "offline")
+

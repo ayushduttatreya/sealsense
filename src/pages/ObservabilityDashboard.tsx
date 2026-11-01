@@ -30,8 +30,9 @@ function formatChartTime(iso: string) {
 export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Props) {
   const [selectedZone, setSelectedZone] = useState<string>('zone-a');
   const [selectedDevice, setSelectedDevice] = useState<string>('esp32-zone-a-01');
+  const [selectedSource, setSelectedSource] = useState<'all' | 'REAL' | 'SIMULATED'>('all');
   const [catalogItems, setCatalogItems] = useState<any[]>([]);
-  const [selectedCatalogId, setSelectedCatalogId] = useState<string>('usda_sitophilus_oryzae');
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string>('usda-bugbytes-accelrw');
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -48,7 +49,7 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
     setIsLive,
     lastFetched,
     fetchTelemetry,
-  } = useObservabilityData(selectedZone, selectedDevice, '15m');
+  } = useObservabilityData(selectedZone, selectedDevice, '15m', selectedSource);
 
   // Load genuine USDA reference recordings for authentic waveform/spectral inspection
   useEffect(() => {
@@ -57,16 +58,16 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
       .then(data => {
         if (Array.isArray(data) && data.length > 0) {
           setCatalogItems(data);
-          setSelectedCatalogId(data[0].catalog_id);
+          setSelectedCatalogId(data[0].id || data[0].catalog_id);
         }
       })
       .catch(() => {});
   }, []);
 
   const currentReading: EnvironmentalReading | null = latest?.reading ?? (history.length > 0 ? history[history.length - 1] : null);
-  const isHardware = latest?.is_hardware ?? (currentReading?.source === 'REAL');
+  const isHardware = latest?.is_hardware ?? (currentReading ? currentReading.source === 'REAL' : !selectedDevice.startsWith('demo-'));
   const transport = latest?.transport ?? currentReading?.transport ?? 'usb_serial';
-  const deviceStatus = latest?.device_status ?? 'online';
+  const deviceStatus = latest?.device_status ?? 'offline';
 
   // Trends calculation
   const prevReading: EnvironmentalReading | null = history.length >= 2 ? history[history.length - 2] : null;
@@ -148,7 +149,7 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
     };
   }, [isPlayingAudio]);
 
-  const activeCatalogItem = catalogItems.find(c => c.catalog_id === selectedCatalogId);
+  const activeCatalogItem = catalogItems.find(c => (c.id || c.catalog_id) === selectedCatalogId);
 
   const toggleAudioPlay = () => {
     if (!audioRef.current) return;
@@ -176,19 +177,54 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
             <span className="gf-toolbar-subtitle">· Node Exporter Real-Time Telemetry</span>
           </div>
 
-          <div className={`gf-live-indicator ${isHardware ? 'live-hw' : 'live-sim'} ${!isLive ? 'paused' : ''} ${deviceStatus === 'stale' ? 'stale' : ''}`}>
-            <span className="gf-pulse-dot" />
-            <span>
-              {!isLive
-                ? 'PAUSED'
-                : isHardware
-                ? `LIVE · HARDWARE (${transport.toUpperCase()})`
-                : 'LIVE · PREVIEW (SIMULATION)'}
-            </span>
-          </div>
+          {(() => {
+            const isStale = deviceStatus === 'stale';
+            const isOffline = deviceStatus === 'offline' || deviceStatus === 'disconnected';
+            const label = !isLive
+              ? 'PAUSED'
+              : isHardware
+              ? isOffline
+                ? 'REAL HARDWARE · DISCONNECTED'
+                : isStale
+                ? `REAL HARDWARE · STALE (${Math.round(latest?.age_seconds ?? 0)}s)`
+                : `REAL HARDWARE · ONLINE (${transport.toUpperCase()})`
+              : 'SIMULATED DEMO · SCENARIO PREVIEW';
+
+            const cls = !isLive
+              ? 'paused'
+              : isHardware
+              ? isOffline
+                ? 'stale'
+                : isStale
+                ? 'stale'
+                : 'live-hw'
+              : 'live-sim';
+
+            return (
+              <div className={`gf-live-indicator ${cls}`}>
+                <span className="gf-pulse-dot" />
+                <span>{label}</span>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="gf-toolbar-controls">
+          {/* Source Filter Selector */}
+          <div className="gf-control-item">
+            <span className="gf-control-label">Source:</span>
+            <select
+              id="gf-source-select"
+              className="gf-select"
+              value={selectedSource}
+              onChange={e => setSelectedSource(e.target.value as 'all' | 'REAL' | 'SIMULATED')}
+            >
+              <option value="all">All Sources</option>
+              <option value="REAL">REAL HARDWARE</option>
+              <option value="SIMULATED">SIMULATED DEMO</option>
+            </select>
+          </div>
+
           {/* Storage Zone Selector */}
           <div className="gf-control-item">
             <span className="gf-control-label">Zone:</span>
@@ -212,12 +248,26 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
               id="gf-device-select"
               className="gf-select"
               value={selectedDevice}
-              onChange={e => setSelectedDevice(e.target.value)}
+              onChange={e => {
+                const dev = e.target.value;
+                setSelectedDevice(dev);
+                if (dev !== 'all') {
+                  if (!dev.startsWith('demo-')) {
+                    setSelectedSource('REAL');
+                  } else {
+                    setSelectedSource('SIMULATED');
+                  }
+                }
+              }}
             >
               <option value="all">All Devices</option>
-              {devices.map(d => (
-                <option key={d.id} value={d.id}>{d.name} ({d.id})</option>
-              ))}
+              {devices.map(d => {
+                const isReal = !d.id.startsWith('demo-');
+                const tag = isReal ? '[REAL HARDWARE]' : '[SIMULATED DEMO]';
+                return (
+                  <option key={d.id} value={d.id}>{d.name} {tag}</option>
+                );
+              })}
             </select>
           </div>
 
@@ -380,18 +430,26 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
           <div className="gf-stat-header">
             <span className="gf-stat-title">Node Link & Health</span>
             <span className={`gf-stat-badge ${deviceStatus === 'online' ? 'valid' : deviceStatus === 'stale' ? 'warn' : 'crit'}`}>
-              {deviceStatus.toUpperCase()}
+              {deviceStatus === 'online' ? 'ONLINE' : deviceStatus === 'stale' ? 'STALE' : 'DISCONNECTED'}
             </span>
           </div>
           <div className="gf-stat-body">
-            <span className="gf-stat-value" style={{ fontSize: '18px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Cpu size={18} style={{ color: '#c084fc' }} />
-              {currentReading?.device_id || 'esp32-zone-a-01'}
+            <span className="gf-stat-value" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Cpu size={16} style={{ color: isHardware ? '#4ade80' : '#38bdf8' }} />
+              {currentReading?.device_id || selectedDevice || 'esp32-zone-a-01'}
             </span>
           </div>
           <div className="gf-stat-footer">
-            <span style={{ textTransform: 'uppercase' }}>Via {transport.replace('_', ' ')}</span>
-            <span>{currentReading?.firmware_version || 'v2.0.0-PROTOTYPE'}</span>
+            <span style={{ color: isHardware ? '#4ade80' : '#38bdf8', fontWeight: 600 }}>
+              {isHardware ? 'REAL HARDWARE' : 'SIMULATED DEMO'}
+            </span>
+            <span>
+              {latest?.age_seconds !== null && latest?.age_seconds !== undefined
+                ? latest.age_seconds < 60
+                  ? `${Math.round(latest.age_seconds)}s ago`
+                  : `${Math.round(latest.age_seconds / 60)}m ago`
+                : 'VIA ' + transport.toUpperCase()}
+            </span>
           </div>
         </div>
       </div>
@@ -568,11 +626,14 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
                 value={selectedCatalogId}
                 onChange={e => setSelectedCatalogId(e.target.value)}
               >
-                {catalogItems.map(c => (
-                  <option key={c.catalog_id} value={c.catalog_id}>
-                    {c.species} ({c.life_stage}) — {c.recording_domain}
-                  </option>
-                ))}
+                {catalogItems.map((c, idx) => {
+                  const itemId = c.id || c.catalog_id || `catalog-${idx}`;
+                  return (
+                    <option key={itemId} value={itemId}>
+                      {c.species} ({c.life_stage}) — {c.recording_domain}
+                    </option>
+                  );
+                })}
               </select>
 
               <button
@@ -698,7 +759,7 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
               </thead>
               <tbody>
                 {history.slice(-8).reverse().map((r, idx) => (
-                  <tr key={r.id || idx}>
+                  <tr key={r.id ? `${r.id}-${idx}` : `hist-${idx}-${r.timestamp}`}>
                     <td style={{ color: '#94a3b8' }}>{formatChartTime(r.timestamp)}</td>
                     <td>{r.device_id}</td>
                     <td style={{ color: r.co2_ppm && r.co2_ppm >= 1200 ? '#f87171' : r.co2_ppm && r.co2_ppm >= 700 ? '#facc15' : '#4ade80' }}>
@@ -710,7 +771,7 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
                     <td style={{ color: '#f43f5e' }}>{r.audio_peak_dbfs !== null && r.audio_peak_dbfs !== undefined ? `${r.audio_peak_dbfs.toFixed(1)} dBFS` : '—'}</td>
                     <td>
                       <span className={`gf-tag ${r.source === 'REAL' ? 'real' : 'simulated'}`}>
-                        {r.source === 'REAL' ? 'REAL' : 'SIM'}
+                        {r.source === 'REAL' ? 'REAL HARDWARE' : 'SIMULATED DEMO'}
                       </span>
                     </td>
                   </tr>
@@ -736,9 +797,9 @@ export function ObservabilityDashboard({ alerts, zones, devices, onReload }: Pro
                 All environmental and acoustic thresholds within baseline
               </div>
             ) : (
-              alerts.slice(0, 5).map(a => (
+              alerts.slice(0, 5).map((a, idx) => (
                 <div
-                  key={a.id}
+                  key={a.id ? `${a.id}-${idx}` : `alert-${idx}`}
                   style={{
                     background: '#0a0d18',
                     border: '1px solid #1e253c',

@@ -57,7 +57,7 @@ export interface LatestTelemetryResponse {
   source: DataSource;
   transport: string | null;
   age_seconds: number | null;
-  device_status: 'online' | 'stale' | 'offline';
+  device_status: 'online' | 'stale' | 'offline' | 'disconnected';
 }
 
 export interface TelemetryHistoryResponse {
@@ -157,6 +157,11 @@ export interface AcousticInferenceResult {
   score_semantics: string;
   top_predictions: PredictionItem[];
   confidence_band: 'low' | 'medium' | 'high' | 'uncertain';
+  domain_prediction?: string | null;
+  domain_score?: number | null;
+  domain_confidence_band?: 'low' | 'medium' | 'high' | 'uncertain' | null;
+  domain_model_id?: string | null;
+  domain_probabilities?: Record<string, number> | null;
   inference_duration_ms?: number | null;
   audio_sample_rate: number;
   audio_duration_sec: number;
