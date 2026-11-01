@@ -141,34 +141,34 @@ By combining continuous atmospheric sensing with on-demand acoustic investigatio
 ```mermaid
 flowchart TD
     subgraph Hardware ["Hardware Layer (Edge Node)"]
-        SCD41["Sensirion SCD41\n(I2C: GPIO 21 / 22)\nCO2, Temp, Air RH"]
-        INMP441["INMP441 MEMS Mic\n(I2S: GPIO 25 / 26 / 33)\n16 kHz Mono Audio"]
-        Buzzer["Piezo Buzzer\n(GPIO 27)\nDeterministic Beeps"]
-        ESP32["ESP32 Microcontroller\nFirmware v1.2.0"]
-        SCD41 -->|I2C 5s poll| ESP32
-        INMP441 -->|I2S 16kHz DMA| ESP32
-        ESP32 -->|GPIO Trigger| Buzzer
+        SCD41["Sensirion SCD41<br/>(I2C: GPIO 21 / 22)<br/>CO2, Temp, Air RH"]
+        INMP441["INMP441 MEMS Mic<br/>(I2S: GPIO 25 / 26 / 33)<br/>16 kHz Mono Audio"]
+        Buzzer["Piezo Buzzer<br/>(GPIO 27)<br/>Deterministic Beeps"]
+        ESP32["ESP32 Microcontroller<br/>Firmware v1.2.0"]
+        SCD41 -->|"I2C 5s poll"| ESP32
+        INMP441 -->|"I2S 16kHz DMA"| ESP32
+        ESP32 -->|"GPIO Trigger"| Buzzer
     end
 
     subgraph Backend ["SealSense Backend (FastAPI + Async Python)"]
-        Ingest["/api/telemetry\n(HTTP POST Ingestion)"]
-        AudioUpload["/api/inference/acoustic/upload\n(WAV Ingestion & Resampling)"]
-        RuleEngine["Alert Rule Engine\n(alert_rules.py)\nSub-ms Deterministic Evaluation"]
-        NocturneAdapter["Nocturne Mini Adapter\n(nocturne.py)\nLazy-Loaded PyTorch / Safetensors"]
-        ZeusAdapter["Zeus Adapter (zeus.py)\nBlocked on CPU / Fallback Active"]
-        DB[(SQLite WAL Database\nsealsense.db)]
+        Ingest["/api/telemetry<br/>(HTTP POST Ingestion)"]
+        AudioUpload["/api/inference/acoustic/upload<br/>(WAV Ingestion & Resampling)"]
+        RuleEngine["Alert Rule Engine<br/>(alert_rules.py)<br/>Sub-ms Deterministic Evaluation"]
+        NocturneAdapter["Nocturne Mini Adapter<br/>(nocturne.py)<br/>Lazy-Loaded PyTorch / Safetensors"]
+        ZeusAdapter["Zeus Adapter (zeus.py)<br/>Blocked on CPU / Fallback Active"]
+        DB[("SQLite WAL Database<br/>sealsense.db")]
         
-        ESP32 -->|HTTP JSON POST (30s)| Ingest
+        ESP32 -->|"HTTP JSON POST (30s)"| Ingest
         Ingest --> RuleEngine
         Ingest --> DB
-        RuleEngine -->|Persist Alerts & Traces| DB
+        RuleEngine -->|"Persist Alerts & Traces"| DB
         AudioUpload --> NocturneAdapter
-        NocturneAdapter -->|Optional Save Event| DB
+        NocturneAdapter -->|"Optional Save Event"| DB
     end
 
     subgraph HuggingFace ["Hugging Face Model Cache"]
-        NocturneWeights["stratus-labs/nocturne-v1-mini\nmodel.safetensors (36 MB)\nvocab.json (2,182 classes)"]
-        NocturneAdapter -.->|Local Load / snapshot_download| NocturneWeights
+        NocturneWeights["stratus-labs/nocturne-v1-mini<br/>model.safetensors (36 MB)<br/>vocab.json (2,182 classes)"]
+        NocturneAdapter -.->|"Local Load / snapshot_download"| NocturneWeights
     end
 
     subgraph Frontend ["Frontend Web Console (React 19 + TypeScript + Vite)"]
@@ -184,7 +184,7 @@ flowchart TD
         UI_Alerts --> API_Client
         UI_Acoustic --> API_Client
         UI_Devices --> API_Client
-        API_Client -->|Fetch / JSON / Multipart| Backend
+        API_Client -->|"Fetch / JSON / Multipart"| Backend
     end
 ```
 
