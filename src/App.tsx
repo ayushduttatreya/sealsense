@@ -7,6 +7,7 @@ import { StorageZones } from './pages/StorageZones';
 import { AcousticMonitoring } from './pages/AcousticMonitoring';
 import { AlertsEvents } from './pages/AlertsEvents';
 import { DevicesSensors } from './pages/DevicesSensors';
+import { FarmerApp } from './pages/farmer/FarmerApp';
 import { useSealSenseData } from './hooks/useApi';
 import type { DemoScenario } from './types';
 
@@ -36,28 +37,39 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Layout mode={mode}>
-        {mode === 'demo' && (
-          <ScenarioSelector current={scenario} onChange={handleScenario} />
-        )}
-        {loading ? (
-          <div className="ss-loading">
-            <div className="ss-spinner" />
-            <span>Loading sensor data…</span>
-          </div>
-        ) : (
-          <Routes>
-            <Route path="/" element={<Overview readings={readings} alerts={alerts} zones={zones} devices={devices} onReload={reload} />} />
-            <Route path="/zones" element={<StorageZones zones={zones} devices={devices} readings={readings} alerts={alerts} />} />
-            <Route path="/acoustic" element={<AcousticMonitoring events={events} onValidate={validateAcousticEvent} onBatchReview={batchReviewEvents} />} />
-            <Route path="/alerts" element={<AlertsEvents alerts={alerts} onAcknowledge={acknowledgeAlert} onClear={clearAlert} onGetTrace={getAlertTrace} />} />
-            <Route path="/devices" element={<DevicesSensors devices={devices} zones={zones} />} />
-          </Routes>
-        )}
-      </Layout>
+      <Routes>
+        {/* Dedicated Mobile-First Farmer View */}
+        <Route path="/farmer/*" element={<FarmerApp />} />
+
+        {/* Existing Technical Observability Console */}
+        <Route
+          path="/*"
+          element={
+            <Layout mode={mode}>
+              {mode === 'demo' && (
+                <ScenarioSelector current={scenario} onChange={handleScenario} />
+              )}
+              {loading ? (
+                <div className="ss-loading">
+                  <div className="ss-spinner" />
+                  <span>Loading sensor data…</span>
+                </div>
+              ) : (
+                <Routes>
+                  <Route path="/" element={<Overview readings={readings} alerts={alerts} zones={zones} devices={devices} onReload={reload} />} />
+                  <Route path="/zones" element={<StorageZones zones={zones} devices={devices} readings={readings} alerts={alerts} />} />
+                  <Route path="/acoustic" element={<AcousticMonitoring events={events} onValidate={validateAcousticEvent} onBatchReview={batchReviewEvents} />} />
+                  <Route path="/alerts" element={<AlertsEvents alerts={alerts} onAcknowledge={acknowledgeAlert} onClear={clearAlert} onGetTrace={getAlertTrace} />} />
+                  <Route path="/devices" element={<DevicesSensors devices={devices} zones={zones} />} />
+                </Routes>
+              )}
+            </Layout>
+          }
+        />
+      </Routes>
     </BrowserRouter>
   );
 }
 
-
 export default App;
+

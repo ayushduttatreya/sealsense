@@ -64,6 +64,27 @@ export function Layout({ children, mode }: LayoutProps) {
         </nav>
 
         <div className="ss-sidebar-footer">
+          <Link
+            to="/farmer"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              background: 'linear-gradient(135deg, #1b4d3e, #2d7a62)',
+              color: '#ffffff',
+              padding: '10px 14px',
+              borderRadius: 10,
+              textDecoration: 'none',
+              fontWeight: 600,
+              fontSize: 13,
+              marginBottom: 12,
+              boxShadow: '0 2px 6px rgba(27, 77, 62, 0.3)',
+            }}
+          >
+            <span style={{ fontSize: 16 }}>🌾</span>
+            <span>Farmer View / किसान दृश्य</span>
+          </Link>
           <div className={`ss-mode-badge ${mode === 'backend' ? 'live' : 'demo'}`}>
             {mode === 'backend' ? <Wifi size={12} /> : <WifiOff size={12} />}
             {mode === 'backend' ? 'Live Backend' : 'Demo Mode'}
@@ -91,6 +112,26 @@ export function Layout({ children, mode }: LayoutProps) {
             <span /><span /><span />
           </button>
           <div className="ss-topbar-right">
+            <Link
+              to="/farmer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: '#1b4d3e',
+                color: '#ffffff',
+                padding: '6px 12px',
+                borderRadius: 999,
+                textDecoration: 'none',
+                fontWeight: 600,
+                fontSize: 12,
+                marginRight: 8,
+                transition: 'opacity 0.15s ease',
+              }}
+            >
+              <span>🌾</span>
+              <span>Farmer View</span>
+            </Link>
             <div className={`ss-status-pill ${mode === 'backend' ? 'live' : 'demo'}`}>
               <span className="ss-status-dot" />
               {mode === 'backend' ? 'System Online' : 'Demo Simulation'}
